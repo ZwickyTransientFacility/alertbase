@@ -1,18 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"os"
 
-	"github.com/ZwickyTransientFacility/alertbase/indexdb"
+	"github.com/ZwickyTransientFacility/alertbase/alertdb"
 	"github.com/ZwickyTransientFacility/alertbase/schema"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 )
 
 const (
@@ -21,9 +19,9 @@ const (
 )
 
 func printusage() {
-	fmt.Println(`usage: alertbase-ingest DB-FILE ALERT-FILE
+	fmt.Println(`usage: alertbase-ingest DB-DIR ALERT-FILE
 
-DB-FILE should be a leveldb database file
+DB-DIR should be a leveldb database directory
 ALERT-FILE should be an avro-encoded file containing one or more alerts`)
 }
 
@@ -46,11 +44,25 @@ func ingestFile(filepath, db string) error {
 		return err
 	}
 
-	ingester, err := newIngester(bucket, db)
+	session, err := session.NewSession()
 	if err != nil {
 		return err
 	}
-	return ingester.ingest(alerts)
+	s3 := s3.New(session, aws.NewConfig().WithRegion(awsRegion))
+
+	alertDB, err := alertdb.NewDatabase(db, bucket, s3)
+	if err != nil {
+		return err
+	}
+	defer alertDB.Close()
+
+	for _, a := range alerts {
+		err = alertDB.Add(a)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func alertsFromFile(filepath string) ([]*schema.Alert, error) {
@@ -78,81 +90,4 @@ func alertsFromFile(filepath string) ([]*schema.Alert, error) {
 
 func fatal(err error) {
 	log.Fatalf("FATAL: %v", err)
-}
-
-type ingester struct {
-	blobs blobstore
-	db    *indexdb.IndexDB
-}
-
-func newIngester(bucket, dbPath string) (ingester, error) {
-	blobs, err := newS3Blobstore(bucket)
-	if err != nil {
-		return ingester{}, err
-	}
-	db, err := indexdb.NewIndexDB(dbPath)
-	if err != nil {
-		return ingester{}, err
-	}
-	return ingester{
-		blobs: blobs,
-		db:    db,
-	}, nil
-}
-
-func (i ingester) ingest(alerts []*schema.Alert) error {
-	for _, a := range alerts {
-		contents := bytes.NewBuffer(nil)
-		err := a.Serialize(contents)
-		if err != nil {
-			return fmt.Errorf("unable to serialize alert id=%v: %v", a.ObjectId, err)
-		}
-		url, err := i.blobs.store(a.ObjectId, bytes.NewReader(contents.Bytes()))
-		if err != nil {
-			return err
-		}
-		err = i.db.Add(a, url)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (i ingester) close() error {
-	return i.db.Close()
-}
-
-// blobstore stores large piles of bytes
-type blobstore interface {
-	// Store pile of bytes with a key. Return a URL indicating its location.
-	store(key string, value io.ReadSeeker) (string, error)
-}
-
-type s3Blobstore struct {
-	bucket string
-	s3     s3iface.S3API
-}
-
-func newS3Blobstore(bucket string) (s3Blobstore, error) {
-	session, err := session.NewSession()
-	if err != nil {
-		return s3Blobstore{}, err
-	}
-	s3 := s3.New(session, aws.NewConfig().WithRegion(awsRegion))
-	return s3Blobstore{
-		bucket: bucket,
-		s3:     s3,
-	}, nil
-}
-
-func (bs s3Blobstore) store(key string, body io.ReadSeeker) (string, error) {
-	fullKey := "alerts/v1/" + key
-	url := fmt.Sprintf("s3://%s/%s", bs.bucket, fullKey)
-	_, err := bs.s3.PutObject(&s3.PutObjectInput{
-		Body:   body,
-		Bucket: aws.String(bs.bucket),
-		Key:    aws.String(fullKey),
-	})
-	return url, err
 }

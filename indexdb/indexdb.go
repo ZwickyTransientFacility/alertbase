@@ -2,6 +2,7 @@ package indexdb
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -102,6 +103,7 @@ func (db *IndexDB) GetByTimerange(start, end float64) (urls []string, err error)
 		Start: uint64ToBytes(jd2unix(start)),
 		Limit: uint64ToBytes(jd2unix(end)),
 	}
+	log.Printf("searching in byte range %v to %v", byterange.Start, byterange.Limit)
 	iterator := db.byTimestamp.NewIterator(byterange, nil)
 	defer iterator.Release()
 

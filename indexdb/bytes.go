@@ -17,7 +17,7 @@ func (a packedUint64s) Len() int {
 func (a packedUint64s) Values() []uint64 {
 	output := make([]uint64, a.Len())
 	for i := 0; i < a.Len(); i++ {
-		output[i] = binary.LittleEndian.Uint64(a[i*8 : (i+1)*8])
+		output[i] = binary.BigEndian.Uint64(a[i*8 : (i+1)*8])
 	}
 	return output
 }
@@ -28,7 +28,7 @@ func (a packedUint64s) Append(v uint64) packedUint64s {
 
 func uint64ToBytes(v uint64) []byte {
 	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, v)
+	binary.BigEndian.PutUint64(buf, v)
 	return buf
 }
 
