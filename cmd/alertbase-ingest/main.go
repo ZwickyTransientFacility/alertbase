@@ -7,16 +7,16 @@ import (
 	"log"
 	"os"
 
+	"github.com/ZwickyTransientFacility/alertbase/indexdb"
 	"github.com/ZwickyTransientFacility/alertbase/schema"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
-	"github.com/syndtr/goleveldb/leveldb"
 )
 
 const (
-	bucket    = "ztf-alert-achive-prototyping"
+	bucket    = "ztf-alert-archive-prototyping"
 	awsRegion = "us-west-2"
 )
 
@@ -82,7 +82,7 @@ func fatal(err error) {
 
 type ingester struct {
 	blobs blobstore
-	db    keyvalDB
+	db    *indexdb.IndexDB
 }
 
 func newIngester(bucket, dbPath string) (ingester, error) {
@@ -90,7 +90,7 @@ func newIngester(bucket, dbPath string) (ingester, error) {
 	if err != nil {
 		return ingester{}, err
 	}
-	db, err := newLevelDB(dbPath)
+	db, err := indexdb.NewIndexDB(dbPath)
 	if err != nil {
 		return ingester{}, err
 	}
@@ -111,12 +111,16 @@ func (i ingester) ingest(alerts []*schema.Alert) error {
 		if err != nil {
 			return err
 		}
-		err = i.db.store([]byte(a.ObjectId), []byte(url))
+		err = i.db.Add(a, url)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (i ingester) close() error {
+	return i.db.Close()
 }
 
 // blobstore stores large piles of bytes
@@ -151,25 +155,4 @@ func (bs s3Blobstore) store(key string, body io.ReadSeeker) (string, error) {
 		Key:    aws.String(fullKey),
 	})
 	return url, err
-}
-
-// keyvalDB indexes key-value pairs
-type keyvalDB interface {
-	store(key, value []byte) error
-}
-
-type levelDB struct {
-	ldb *leveldb.DB
-}
-
-func newLevelDB(filepath string) (levelDB, error) {
-	db, err := leveldb.OpenFile(filepath, nil)
-	if err != nil {
-		return levelDB{}, err
-	}
-	return levelDB{ldb: db}, nil
-}
-
-func (db levelDB) store(key, value []byte) error {
-	return db.ldb.Put(key, value, nil)
 }
