@@ -69,12 +69,30 @@ func (db *Database) GetByTimerange(start, end float64) ([]*schema.Alert, error) 
 	}
 	alerts := make([]*schema.Alert, len(urls))
 	for i, u := range urls {
+		log.Printf("fetching %v", u)
 		alerts[i], err = db.blobs.Read(u)
 		if err != nil {
 			return nil, err
 		}
 	}
 	return alerts, nil
+}
+
+func (db *Database) StreamByTimerange(start, end float64, ch chan *schema.Alert) error {
+	defer close(ch)
+	urls, err := db.index.GetByTimerange(start, end)
+	if err != nil {
+		return err
+	}
+	for _, u := range urls {
+		log.Printf("fetching %v", u)
+		alert, err := db.blobs.Read(u)
+		if err != nil {
+			return err
+		}
+		ch <- alert
+	}
+	return nil
 }
 
 func (db *Database) Close() error {

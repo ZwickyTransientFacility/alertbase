@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/ZwickyTransientFacility/alertbase/alertdb"
 	"github.com/ZwickyTransientFacility/alertbase/schema"
@@ -19,10 +20,10 @@ const (
 )
 
 func printusage() {
-	fmt.Println(`usage: alertbase-ingest DB-DIR ALERT-FILE
+	fmt.Println(`usage: alertbase-ingest DB-DIR ALERT-FILE-GLOB
 
 DB-DIR should be a leveldb database directory
-ALERT-FILE should be an avro-encoded file containing one or more alerts`)
+ALERT-FILE-GLOB should match avro-encoded files containing one or more alerts`)
 }
 
 func main() {
@@ -31,35 +32,49 @@ func main() {
 		os.Exit(1)
 	}
 	db := os.Args[1]
-	file := os.Args[2]
-	err := ingestFile(file, db)
+	glob := os.Args[2]
+	alertDB, err := initDB(db)
+	if err != nil {
+		fatal(err)
+	}
+	defer alertDB.Close()
+	err = ingestFiles(glob, alertDB)
 	if err != nil {
 		fatal(err)
 	}
 }
 
-func ingestFile(filepath, db string) error {
-	alerts, err := alertsFromFile(filepath)
-	if err != nil {
-		return err
-	}
-
+func initDB(db string) (*alertdb.Database, error) {
 	session, err := session.NewSession()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	s3 := s3.New(session, aws.NewConfig().WithRegion(awsRegion))
 
 	alertDB, err := alertdb.NewDatabase(db, bucket, s3)
 	if err != nil {
+		return nil, err
+	}
+	return alertDB, nil
+
+}
+
+func ingestFiles(glob string, db *alertdb.Database) error {
+	files, err := filepath.Glob(glob)
+	if err != nil {
 		return err
 	}
-	defer alertDB.Close()
-
-	for _, a := range alerts {
-		err = alertDB.Add(a)
+	for _, f := range files {
+		alerts, err := alertsFromFile(f)
 		if err != nil {
 			return err
+		}
+
+		for _, a := range alerts {
+			err = db.Add(a)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil

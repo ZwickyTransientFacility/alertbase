@@ -105,6 +105,7 @@ func (db *IndexDB) GetByTimerange(start, end float64) (urls []string, err error)
 	}
 	log.Printf("searching in byte range %v to %v", byterange.Start, byterange.Limit)
 	iterator := db.byTimestamp.NewIterator(byterange, nil)
+	log.Printf("iterator created")
 	defer iterator.Release()
 
 	err = iterator.Error()
@@ -115,14 +116,18 @@ func (db *IndexDB) GetByTimerange(start, end float64) (urls []string, err error)
 	urls = make([]string, 0)
 	for iterator.Next() {
 		ids := packedUint64s(iterator.Value())
+		log.Printf("got matching key: %v", iterator.Key())
+		log.Printf("%d values found: %v", ids.Len())
 		for _, id := range ids.Values() {
 			url, err := db.GetByCandidateID(id)
 			if err != nil {
 				return nil, fmt.Errorf("unable to resolve candidate ID %d to a URL: %w", id, err)
 			}
+			log.Printf("url=%q", url)
 			urls = append(urls, url)
 		}
 	}
+	log.Printf("iteration complete")
 
 	err = iterator.Error()
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/ZwickyTransientFacility/alertbase/alertdb"
+	"github.com/ZwickyTransientFacility/alertbase/schema"
 )
 
 func queryCandidate(db *alertdb.Database, candidateID uint64) error {
@@ -37,10 +38,16 @@ func queryTimerange(db *alertdb.Database, start, end, format string) error {
 	if err != nil {
 		return err
 	}
-	alerts, err := db.GetByTimerange(startFloat, endFloat)
+
+	results := make(chan *schema.Alert, 100)
+	go func() {
+		err = db.StreamByTimerange(startFloat, endFloat, results)
+	}()
+	for alert := range results {
+		printAlert(alert)
+	}
 	if err != nil {
 		return err
 	}
-	printAlerts(alerts)
 	return nil
 }
