@@ -4,6 +4,88 @@ This is a journal of experimentation results while working with this codebase.
 It is a chronological journal, with newest results on the bottom; it is mostly
 kept as a record, not as a human-readable document.
 
+## 2020-08-27
+
+### Running on EC2
+
+I set up a m5.large EC2 instance in us-west-2 to see whether speed improves. It
+does!
+
+#### Key results
+
+Using the same indexdb as below, S3 query speed drops to ~10-30ms.
+
+Specifically, here's the response times in 10%ile buckets (units are seconds)
+
+```
+count         745
+mean     0.031772
+std      0.023132
+
+0%       0.002300
+10%      0.012900
+20%      0.014800
+30%      0.021020
+40%      0.025760
+50%      0.028700
+60%      0.032040
+70%      0.035900
+80%      0.040800
+90%      0.051660
+max      0.425500
+```
+
+At this rate, we get ~40 alerts/sec. This still seems pretty slow! But it's
+faster at least.
+
+#### Log of how to do this
+
+Created an amazon linux 2 ec2 instance by clicking through the console. Gave it
+an IAM Role, `alertbase-dev`, which has full access to S3. Gave it an SSH Key
+Pair and downloaded the keys.
+
+Here's what I did:
+```bash
+# Build the program (I'm on linux so the compiled binary works)
+go build ./cmd/alertbase-query
+
+# Copy the program onto the host
+scp -i ~/.ssh/awskeys/swnelson-dev.pem alertbase-query ec2-user@44.226.205.70:/home/ec2-user/alertbase-query
+
+# Copy the database
+rsync -r -v -e 'ssh -i  ~/.ssh/awskeys/swnelson-dev.pem' ./alerts.db ec2-user@44.226.205.70:/home/ec2-user/alerts.db
+
+# SSH onto the host
+ssh -i ~/.ssh/awskeys/swnelson-dev.pem ec2-user@44.226.205.70
+
+# Run query to test that things work:
+./alertbase-query -db ./alerts.db/alerts.db/ -candidate=1309477146315015022
+# OUTPUT: alert id=1309477146315015022  jd=2459063.977  obj=ZTF18abmwrai  n_prev=54  mag=20.1318
+
+# Install 'gnomon', a utility to measure timestamp deltas in log outpuit
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.34.0/install.sh | bash
+. ~/.nvm/nvm.sh
+nvm install node
+npm install -g gnomon
+
+# Run the "real" query, piping output to a file:
+./alertbase-query -db ./alerts.db/alerts.db -time-start=2459063.9751 -time-end=2459063.9752 2>/dev/null | gnomon 2>&1 > speed.log
+
+# Process the file to strip it down to a list of time deltas:
+cat speed.log | head -n -2 | awk '{print $1}' | sed 's/s//g' > times.log
+
+# Download the file
+scp -i ~/.ssh/awskeys/swnelson-dev.pem ec2-user@44.226.205.70:/home/ec2-user/times.log .
+```
+
+### Thoughts
+
+Parallelizing the requests seems important, but it's great to see how low the
+RTT can get inside the region.
+
+I'm really glad that the DB is genuinely portable!
+
+
 ## 2020-08-25
 
 ### Ingestion of 1 day of data
