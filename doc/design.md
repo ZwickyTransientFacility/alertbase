@@ -112,12 +112,15 @@ and each requires its own round-trip; S3 does not support HTTP pipelining or
 http/2, so retrieving 1,000 alerts at 100ms each will take 100 seconds for
 example.
 
-The right approach here is to concurrently issue all 1,000 GET requests. This
-needs to be implemented in the Go code for `alertbase-query`. It poses more risk
-for pure Python clients that directly request data from S3 (like we'd want to
-take advantage of 'Requester Pays' billing). Concurrency is not well-supported
-in Python, so we might need a fairly sophisticated client library.
+The right approach here is to concurrently issue all 1,000 GET requests. This is
+implemented in the Go code for `alertbase-query`, which results in much faster
+completion times, loading 1,000 alerts in around 3 seconds.
 
+Depending upon concurrency poses some risk for pure Python clients that directly
+request data from S3 (like we'd want to take advantage of 'Requester Pays'
+billing). Concurrency is not well-supported in Python, so we might need a fairly
+sophisticated client library.
+;
 In practice, we see about 100-200ms round trip times from the internet to S3,
 and about 2-4ms RTTs from AWS's `us-west-2` region to S3.
 
