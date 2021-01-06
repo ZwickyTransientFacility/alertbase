@@ -172,3 +172,28 @@ one object requires a bunch of "random" reads of different exposures. If we pack
 by objectID, then each time query will be random access.
 
 We could redundantly store data, but that would be expensive.
+
+## 2021-01-05
+
+### GCP instead of AWS?
+
+I'm back from parental leave, and it sounds like Rubin is going to use Google's
+cloud, not AWS. It might be wise for me to look at how Google Cloud Storage will
+perform and compare it to S3.
+
+#### Pricing
+
+Pricing looks similar, overall.
+ - ["Requester Pays" billing exists](https://cloud.google.com/storage/docs/requester-pays).
+ - Storage costs $0.02 per GB per month, which is the same.
+ - Egress costs $0.08-0.12 per GB to internet, which is similar, slightly high.
+ - Same-region access is free, which is better.
+
+#### Features
+Composite objects!
+
+Composite objects let you combine up to 32 objects together, appending them
+end-to-end. This could let us store large chunks in a single file, like the
+tarball service.
+
+On the other hand, it's not obvious that it's important to simplify that case...

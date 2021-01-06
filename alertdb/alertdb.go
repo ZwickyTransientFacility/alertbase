@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"cloud.google.com/go/storage"
 	"github.com/ZwickyTransientFacility/alertbase/blobstore"
 	"github.com/ZwickyTransientFacility/alertbase/indexdb"
 	"github.com/ZwickyTransientFacility/alertbase/schema"
@@ -12,11 +13,26 @@ import (
 
 type Database struct {
 	index *indexdb.IndexDB
-	blobs *blobstore.S3Blobstore
+	blobs Blobstore
 }
 
-func NewDatabase(indexDBPath string, s3Bucket string, s3Client s3iface.S3API) (*Database, error) {
+type Blobstore interface {
+	Read(url string) (*schema.Alert, error)
+	ReadMany(urls []string) *blobstore.AlertIterator
+	Write(*schema.Alert) (url string, err error)
+}
+
+func NewS3Database(indexDBPath string, s3Bucket string, s3Client s3iface.S3API) (*Database, error) {
 	blobs := blobstore.NewS3Blobstore(s3Client, s3Bucket)
+	indexDB, err := indexdb.NewIndexDB(indexDBPath)
+	if err != nil {
+		return nil, err
+	}
+	return &Database{index: indexDB, blobs: blobs}, nil
+}
+
+func NewGoogleCloudDatabase(indexDBPath string, gcsBucket string, gcsClient *storage.Client) (*Database, error) {
+	blobs := blobstore.NewCloudStorageBlobstore(gcsClient, gcsBucket)
 	indexDB, err := indexdb.NewIndexDB(indexDBPath)
 	if err != nil {
 		return nil, err
