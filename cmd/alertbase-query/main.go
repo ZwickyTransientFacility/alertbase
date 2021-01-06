@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 
+	"cloud.google.com/go/storage"
 	"github.com/ZwickyTransientFacility/alertbase/alertdb"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -19,8 +22,10 @@ var (
 	timeEnd    = flag.String("time-end", "", "query by time range: end time")
 	timeFormat = flag.String("time-format", "jd", "format of time inputs (can be 'jd', 'unixnano', or 'rfc3339'")
 
-	db     = flag.String("db", "alerts.db", "path to alerts database")
+	dbPath = flag.String("db", "alerts.db", "path to alerts database")
 	bucket = flag.String("bucket", "ztf-alert-archive-prototyping", "s3 bucket containing alert data")
+
+	platform = flag.String("platform", "aws", "platform (can be 'aws' or 'google'")
 )
 
 func main() {
@@ -34,10 +39,27 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	s3 := s3.New(session, aws.NewConfig().WithRegion("us-west-2"))
-	db, err := alertdb.NewDatabase(*db, *bucket, s3)
-	if err != nil {
-		fatal(err)
+
+	var db *alertdb.Database
+	switch *platform {
+	case "aws":
+		s3 := s3.New(session, aws.NewConfig().WithRegion("us-west-2"))
+		db, err = alertdb.NewS3Database(*dbPath, *bucket, s3)
+		if err != nil {
+			fatal(err)
+		}
+	case "google":
+		ctx := context.Background()
+		gcs, err := storage.NewClient(ctx)
+		if err != nil {
+			fatal(err)
+		}
+		db, err = alertdb.NewGoogleCloudDatabase(*dbPath, *bucket, gcs)
+		if err != nil {
+			fatal(err)
+		}
+	default:
+		fatal(errors.New("invalid platform"))
 	}
 	defer db.Close()
 

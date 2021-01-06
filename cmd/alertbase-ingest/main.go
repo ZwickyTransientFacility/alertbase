@@ -51,7 +51,7 @@ func initDB(db string) (*alertdb.Database, error) {
 	}
 	s3 := s3.New(session, aws.NewConfig().WithRegion(awsRegion))
 
-	alertDB, err := alertdb.NewDatabase(db, bucket, s3)
+	alertDB, err := alertdb.NewS3Database(db, bucket, s3)
 	if err != nil {
 		return nil, err
 	}
