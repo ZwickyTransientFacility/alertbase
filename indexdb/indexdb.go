@@ -8,6 +8,7 @@ import (
 
 	"github.com/ZwickyTransientFacility/alertbase/internal/ctxlog"
 	"github.com/ZwickyTransientFacility/alertbase/schema"
+	"github.com/spenczar/healpix"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"go.uber.org/zap"
@@ -22,9 +23,13 @@ type IndexDB struct {
 
 	// maps Timestamp -> sequence of 8-byte candidate IDs
 	byTimestamp *leveldb.DB
+
+	// maps HEALPix pixel -> sequence of 8-byte candidate IDs
+	byHealpix     *leveldb.DB
+	healpixMapper *healpix.HEALPixMapper
 }
 
-func NewIndexDB(dbPath string) (*IndexDB, error) {
+func NewIndexDB(dbPath string, healpixOrder int) (*IndexDB, error) {
 	err := os.MkdirAll(dbPath, 0755)
 	if err != nil {
 		return nil, err
@@ -45,10 +50,27 @@ func NewIndexDB(dbPath string) (*IndexDB, error) {
 		objectDB.Close()
 		return nil, fmt.Errorf("unable to open timestamp database: %w", err)
 	}
+	healpixDB, err := leveldb.OpenFile(filepath.Join(dbPath, "healpixels"), nil)
+	if err != nil {
+		candidateDB.Close()
+		objectDB.Close()
+		timestampDB.Close()
+		return nil, fmt.Errorf("unable to open healpix database: %w", err)
+	}
+	healpixMapper, err := healpix.NewHEALPixMapper(healpixOrder, healpix.Nest)
+	if err != nil {
+		candidateDB.Close()
+		objectDB.Close()
+		timestampDB.Close()
+		healpixDB.Close()
+		return nil, fmt.Errorf("unable to open healpix mapper: %w", err)
+	}
 	return &IndexDB{
 		byCandidateID: candidateDB,
 		byObjectID:    objectDB,
 		byTimestamp:   timestampDB,
+		byHealpix:     healpixDB,
+		healpixMapper: healpixMapper,
 	}, nil
 }
 
@@ -67,6 +89,11 @@ func (db *IndexDB) Add(ctx context.Context, a *schema.Alert, url string) error {
 	err = ldbAppend(db.byTimestamp, byteTimestamp(a), id)
 	if err != nil {
 		return fmt.Errorf("unable to write into timestamp DB: %w", err)
+	}
+
+	err = ldbAppend(db.byHealpix, byteHEALPixel(a, db.healpixMapper), id)
+	if err != nil {
+		return fmt.Errorf("unable to write into healpix DB: %w", err)
 	}
 
 	return nil
@@ -153,6 +180,54 @@ func (db *IndexDB) GetByTimerange(ctx context.Context, start, end float64) (urls
 	return urls, nil
 }
 
+func (db *IndexDB) GetByConeSearch(ra, dec, radius float64) (urls []string, err error) {
+	pointing := healpix.RADec(ra, dec)
+	pixranges := db.healpixMapper.QueryDiscInclusive(pointing, radius, 4)
+	for _, pixrange := range pixranges {
+		pixrangeUrls, err := db.queryHealpixRange(pixrange)
+		if err != nil {
+			return nil, err
+		}
+		urls = append(urls, pixrangeUrls...)
+	}
+	return urls, nil
+}
+
+func (db *IndexDB) queryHealpixRange(pixrange healpix.PixelRange) (urls []string, err error) {
+	dbrange := &util.Range{
+		Start: uint64ToBytes(uint64(pixrange.Start)),
+		Limit: uint64ToBytes(uint64(pixrange.Stop)),
+	}
+	iterator := db.byHealpix.NewIterator(dbrange, nil)
+	defer iterator.Release()
+	err = iterator.Error()
+	if err != nil {
+		return nil, err
+	}
+
+	urls = make([]string, 0)
+	for iterator.Next() {
+		ids := packedUint64s(iterator.Value())
+		log.Printf("got matching key: %v", iterator.Key())
+		log.Printf("%d values found: %v", ids.Len())
+		for _, id := range ids.Values() {
+			url, err := db.GetByCandidateID(id)
+			if err != nil {
+				return nil, fmt.Errorf("unable to resolve candidate ID %d to a URL: %w", id, err)
+			}
+			log.Printf("url=%q", url)
+			urls = append(urls, url)
+		}
+	}
+	log.Printf("iteration complete")
+
+	err = iterator.Error()
+	if err != nil {
+		return nil, err
+	}
+	return urls, nil
+}
+
 func (db *IndexDB) Close() error {
 	err := db.byCandidateID.Close()
 	if err != nil {
@@ -165,6 +240,10 @@ func (db *IndexDB) Close() error {
 	err = db.byTimestamp.Close()
 	if err != nil {
 		return fmt.Errorf("unable to close timestamp DB: %w", err)
+	}
+	err = db.byHealpix.Close()
+	if err != nil {
+		return fmt.Errorf("unable to close healpix DB: %w", err)
 	}
 	return nil
 }

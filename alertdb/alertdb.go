@@ -13,6 +13,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const healpixOrder = 10
+
 type Database struct {
 	index *indexdb.IndexDB
 	blobs Blobstore
@@ -26,7 +28,7 @@ type Blobstore interface {
 
 func NewS3Database(indexDBPath string, s3Bucket string, s3Client s3iface.S3API) (*Database, error) {
 	blobs := blobstore.NewS3Blobstore(s3Client, s3Bucket)
-	indexDB, err := indexdb.NewIndexDB(indexDBPath)
+	indexDB, err := indexdb.NewIndexDB(indexDBPath, healpixOrder)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +37,7 @@ func NewS3Database(indexDBPath string, s3Bucket string, s3Client s3iface.S3API) 
 
 func NewGoogleCloudDatabase(indexDBPath string, gcsBucket string, gcsClient *storage.Client) (*Database, error) {
 	blobs := blobstore.NewCloudStorageBlobstore(gcsClient, gcsBucket)
-	indexDB, err := indexdb.NewIndexDB(indexDBPath)
+	indexDB, err := indexdb.NewIndexDB(indexDBPath, healpixOrder)
 	if err != nil {
 		return nil, err
 	}

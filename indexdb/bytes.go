@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 
 	"github.com/ZwickyTransientFacility/alertbase/schema"
+	"github.com/spenczar/healpix"
 )
 
 // packedUints64s provides a way to store a sequence of uint64s in a byte slice,
@@ -42,6 +43,12 @@ func byteObjectID(a *schema.Alert) []byte {
 
 func byteTimestamp(a *schema.Alert) []byte {
 	return uint64ToBytes(jd2unix(a.Candidate.Jd))
+}
+
+func byteHEALPixel(a *schema.Alert, m *healpix.HEALPixMapper) []byte {
+	pointing := healpix.RADec(a.Candidate.Ra, a.Candidate.Dec)
+	pixel := m.PixelAt(pointing)
+	return uint64ToBytes(uint64(pixel))
 }
 
 // jd2unix converts a Julian Date to a Unix Nanosecond Timestamp (doesn't
