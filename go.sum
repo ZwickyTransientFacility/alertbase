@@ -161,6 +161,8 @@ github.com/spenczar/healpix v0.1.0 h1:0B1d35DAC4mUiLdEghnH+rcO7I+nSb68VfwUrMsux2
 github.com/spenczar/healpix v0.1.0/go.mod h1:XfAiSwE+iB+KuyTvOeoIOnN825EuAHbhr6qeOm9rL3A=
 github.com/spenczar/healpix v0.1.1 h1:WBspttEcUICxH6HrOOMsr6KHghZ6+2qFGR5kQqDBjps=
 github.com/spenczar/healpix v0.1.1/go.mod h1:XfAiSwE+iB+KuyTvOeoIOnN825EuAHbhr6qeOm9rL3A=
+github.com/spenczar/healpix v0.1.2 h1:JE+fN73Z4GceWGiqJQRd9VjM6omWYhgHxyjup1nA2Pk=
+github.com/spenczar/healpix v0.1.2/go.mod h1:XfAiSwE+iB+KuyTvOeoIOnN825EuAHbhr6qeOm9rL3A=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
 github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81PSLYec5m4=

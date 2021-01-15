@@ -1,10 +1,13 @@
 package indexdb
 
 import (
+	"context"
 	"encoding/binary"
 
+	"github.com/ZwickyTransientFacility/alertbase/internal/ctxlog"
 	"github.com/ZwickyTransientFacility/alertbase/schema"
 	"github.com/spenczar/healpix"
+	"go.uber.org/zap"
 )
 
 // packedUints64s provides a way to store a sequence of uint64s in a byte slice,
@@ -45,9 +48,20 @@ func byteTimestamp(a *schema.Alert) []byte {
 	return uint64ToBytes(jd2unix(a.Candidate.Jd))
 }
 
-func byteHEALPixel(a *schema.Alert, m *healpix.HEALPixMapper) []byte {
-	pointing := healpix.RADec(a.Candidate.Ra, a.Candidate.Dec)
-	pixel := m.PixelAt(pointing)
+func byteHEALPixel(ctx context.Context, a *schema.Alert, m *healpix.HEALPixMapper) []byte {
+	ctxlog.Debug(ctx, "looking up HEALPixel",
+		zap.Float64("Ra", a.Candidate.Ra),
+		zap.Float64("Dec", a.Candidate.Dec),
+	)
+	p := healpix.RADec(a.Candidate.Ra, a.Candidate.Dec)
+	ctxlog.Debug(ctx, "RADec converted to pointing",
+		zap.Float64("Phi", p.Phi),
+		zap.Float64("Theta", p.Theta),
+	)
+	pixel := m.PixelAt(p)
+	ctxlog.Debug(ctx, "Pixel identified",
+		zap.Int("pixel", pixel),
+	)
 	return uint64ToBytes(uint64(pixel))
 }
 

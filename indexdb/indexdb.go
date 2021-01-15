@@ -76,22 +76,36 @@ func NewIndexDB(dbPath string, healpixOrder int) (*IndexDB, error) {
 
 func (db *IndexDB) Add(ctx context.Context, a *schema.Alert, url string) error {
 	id := byteID(a)
+	ctxlog.Debug(ctx, "storing candidate URL",
+		zap.String("db", "candidates"),
+		zap.Binary("key", id),
+		zap.Binary("value", []byte(url)),
+	)
 	err := db.byCandidateID.Put(id, []byte(url), nil)
 	if err != nil {
 		return fmt.Errorf("unable to write into candidate ID DB: %w", err)
 	}
 
-	err = ldbAppend(db.byObjectID, byteObjectID(a), id)
+	err = ldbAppend(
+		ctxlog.WithFields(ctx, zap.String("db", "objects")),
+		db.byObjectID, byteObjectID(a), id,
+	)
 	if err != nil {
 		return fmt.Errorf("unable to write into object ID DB: %w", err)
 	}
 
-	err = ldbAppend(db.byTimestamp, byteTimestamp(a), id)
+	err = ldbAppend(
+		ctxlog.WithFields(ctx, zap.String("db", "timestamps")),
+		db.byTimestamp, byteTimestamp(a), id,
+	)
 	if err != nil {
 		return fmt.Errorf("unable to write into timestamp DB: %w", err)
 	}
 
-	err = ldbAppend(db.byHealpix, byteHEALPixel(a, db.healpixMapper), id)
+	err = ldbAppend(
+		ctxlog.WithFields(ctx, zap.String("db", "healpix")),
+		db.byHealpix, byteHEALPixel(ctx, a, db.healpixMapper), id,
+	)
 	if err != nil {
 		return fmt.Errorf("unable to write into healpix DB: %w", err)
 	}
@@ -138,7 +152,7 @@ func (db *IndexDB) GetByTimerange(ctx context.Context, start, end float64) (urls
 		Start: uint64ToBytes(startUnix),
 		Limit: uint64ToBytes(endUnix),
 	}
-	ctxlog.Debug(ctx, "searching in byte range",
+	ctxlog.Debug(ctx, "searching by timestamp in byte range",
 		zap.Float64("start-float", start),
 		zap.Float64("end-float", end),
 		zap.Uint64("start-unix", startUnix),
@@ -180,11 +194,11 @@ func (db *IndexDB) GetByTimerange(ctx context.Context, start, end float64) (urls
 	return urls, nil
 }
 
-func (db *IndexDB) GetByConeSearch(ra, dec, radius float64) (urls []string, err error) {
+func (db *IndexDB) GetByConeSearch(ctx context.Context, ra, dec, radius float64) (urls []string, err error) {
 	pointing := healpix.RADec(ra, dec)
 	pixranges := db.healpixMapper.QueryDiscInclusive(pointing, radius, 4)
 	for _, pixrange := range pixranges {
-		pixrangeUrls, err := db.queryHealpixRange(pixrange)
+		pixrangeUrls, err := db.queryHealpixRange(ctx, pixrange)
 		if err != nil {
 			return nil, err
 		}
@@ -193,11 +207,18 @@ func (db *IndexDB) GetByConeSearch(ra, dec, radius float64) (urls []string, err 
 	return urls, nil
 }
 
-func (db *IndexDB) queryHealpixRange(pixrange healpix.PixelRange) (urls []string, err error) {
+func (db *IndexDB) queryHealpixRange(ctx context.Context, pixrange healpix.PixelRange) (urls []string, err error) {
 	dbrange := &util.Range{
 		Start: uint64ToBytes(uint64(pixrange.Start)),
 		Limit: uint64ToBytes(uint64(pixrange.Stop)),
 	}
+	ctxlog.Debug(ctx, "searching by healpix id in byte range",
+		zap.Int("start-int", pixrange.Start),
+		zap.Int("end-int", pixrange.Stop),
+		zap.Binary("start-binary", dbrange.Start),
+		zap.Binary("end-binary", dbrange.Limit),
+	)
+	ctxlog.Debug(ctx, "creating iterator")
 	iterator := db.byHealpix.NewIterator(dbrange, nil)
 	defer iterator.Release()
 	err = iterator.Error()
@@ -208,18 +229,20 @@ func (db *IndexDB) queryHealpixRange(pixrange healpix.PixelRange) (urls []string
 	urls = make([]string, 0)
 	for iterator.Next() {
 		ids := packedUint64s(iterator.Value())
-		log.Printf("got matching key: %v", iterator.Key())
-		log.Printf("%d values found: %v", ids.Len())
+		ctxlog.Debug(ctx, "iterator step",
+			zap.Binary("key", iterator.Key()),
+			zap.Binary("value", iterator.Value()),
+			zap.Int("size", ids.Len()),
+		)
 		for _, id := range ids.Values() {
-			url, err := db.GetByCandidateID(id)
+			url, err := db.GetByCandidateID(ctx, id)
 			if err != nil {
 				return nil, fmt.Errorf("unable to resolve candidate ID %d to a URL: %w", id, err)
 			}
-			log.Printf("url=%q", url)
 			urls = append(urls, url)
 		}
 	}
-	log.Printf("iteration complete")
+	ctxlog.Debug(ctx, "iteration complete")
 
 	err = iterator.Error()
 	if err != nil {
@@ -248,13 +271,22 @@ func (db *IndexDB) Close() error {
 	return nil
 }
 
-func ldbAppend(db *leveldb.DB, key, val []byte) error {
+func ldbAppend(ctx context.Context, db *leveldb.DB, key, val []byte) error {
 	have, err := db.Get(key, nil)
 	if err != nil {
 		if err == leveldb.ErrNotFound {
+			ctxlog.Debug(ctx, "creating new levelDB entry",
+				zap.Binary("key", key),
+				zap.Binary("val", val),
+			)
 			return db.Put(key, val, nil)
 		}
 		return err
 	}
+	ctxlog.Debug(ctx, "appending to levelDB entry",
+		zap.Binary("key", key),
+		zap.Binary("val", val),
+		zap.Int("existing-size", len(have)),
+	)
 	return db.Put(key, append(have, val...), nil)
 }
