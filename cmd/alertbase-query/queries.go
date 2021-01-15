@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -8,8 +9,8 @@ import (
 	"github.com/ZwickyTransientFacility/alertbase/schema"
 )
 
-func queryCandidate(db *alertdb.Database, candidateID uint64) error {
-	alert, err := db.GetByCandidateID(candidateID)
+func queryCandidate(ctx context.Context, db *alertdb.Database, candidateID uint64) error {
+	alert, err := db.GetByCandidateID(ctx, candidateID)
 	if err != nil {
 		return err
 	}
@@ -17,8 +18,8 @@ func queryCandidate(db *alertdb.Database, candidateID uint64) error {
 	return nil
 }
 
-func queryObject(db *alertdb.Database, object string) error {
-	alerts, err := db.GetByObjectID(object)
+func queryObject(ctx context.Context, db *alertdb.Database, object string) error {
+	alerts, err := db.GetByObjectID(ctx, object)
 	if err != nil {
 		return err
 	}
@@ -26,7 +27,7 @@ func queryObject(db *alertdb.Database, object string) error {
 	return nil
 }
 
-func queryTimerange(db *alertdb.Database, start, end, format string) error {
+func queryTimerange(ctx context.Context, db *alertdb.Database, start, end, format string) error {
 	if format != "jd" {
 		return fmt.Errorf("format not implemented: %q", format)
 	}
@@ -41,7 +42,7 @@ func queryTimerange(db *alertdb.Database, start, end, format string) error {
 
 	results := make(chan *schema.Alert, 100)
 	go func() {
-		err = db.StreamByTimerange(startFloat, endFloat, results)
+		err = db.StreamByTimerange(ctx, startFloat, endFloat, results)
 	}()
 	for alert := range results {
 		printAlert(alert)

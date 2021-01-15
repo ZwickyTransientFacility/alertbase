@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -60,6 +61,8 @@ func initDB(db string) (*alertdb.Database, error) {
 }
 
 func ingestFiles(glob string, db *alertdb.Database) error {
+	ctx := context.Background()
+
 	files, err := filepath.Glob(glob)
 	if err != nil {
 		return err
@@ -71,7 +74,7 @@ func ingestFiles(glob string, db *alertdb.Database) error {
 		}
 
 		for _, a := range alerts {
-			err = db.Add(a)
+			err = db.Add(ctx, a)
 			if err != nil {
 				return err
 			}

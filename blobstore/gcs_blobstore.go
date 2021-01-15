@@ -23,21 +23,21 @@ func NewCloudStorageBlobstore(client *storage.Client, bucket string) *CloudStora
 	}
 }
 
-func (s *CloudStorageBlobstore) Write(a *schema.Alert) (string, error) {
+func (s *CloudStorageBlobstore) Write(ctx context.Context, a *schema.Alert) (string, error) {
 	key := fmt.Sprintf("alerts/v1/%s/%d", a.ObjectId, a.Candid)
 	obj := s.bucket.Object(key)
-	w := obj.NewWriter(context.TODO())
+	w := obj.NewWriter(ctx)
 	err := a.Serialize(w)
 	url := fmt.Sprintf("https://storage.googleapis.com/%s/%s", obj.BucketName(), key)
 	return url, err
 }
 
-func (s *CloudStorageBlobstore) Read(url string) (*schema.Alert, error) {
+func (s *CloudStorageBlobstore) Read(ctx context.Context, url string) (*schema.Alert, error) {
 	bucket, key, err := s.parseURL(url)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse URL: %w", err)
 	}
-	reader, err := s.client.Bucket(bucket).Object(key).NewReader(context.TODO())
+	reader, err := s.client.Bucket(bucket).Object(key).NewReader(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func (s *CloudStorageBlobstore) Read(url string) (*schema.Alert, error) {
 	return schema.DeserializeAlert(reader)
 }
 
-func (s *CloudStorageBlobstore) ReadMany(urls []string) *AlertIterator {
+func (s *CloudStorageBlobstore) ReadMany(ctx context.Context, urls []string) *AlertIterator {
 	// TODO: parallelism
 	ai := &AlertIterator{
 		alerts: make(chan *schema.Alert, 1),
@@ -54,7 +54,7 @@ func (s *CloudStorageBlobstore) ReadMany(urls []string) *AlertIterator {
 	go func() {
 		defer close(ai.alerts)
 		for _, u := range urls {
-			alert, err := s.Read(u)
+			alert, err := s.Read(ctx, u)
 			if err != nil {
 				ai.errors <- err
 			} else {

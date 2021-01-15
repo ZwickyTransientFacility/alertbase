@@ -85,6 +85,7 @@ func ingestFiles(glob string, db *alertdb.Database) error {
 	if err != nil {
 		return err
 	}
+	ctx := context.Background()
 	for _, f := range files {
 		alerts, err := alertsFromFile(f)
 		if err != nil {
@@ -92,7 +93,7 @@ func ingestFiles(glob string, db *alertdb.Database) error {
 		}
 
 		for _, a := range alerts {
-			err = db.Add(a)
+			err = db.Add(ctx, a)
 			if err != nil {
 				return err
 			}

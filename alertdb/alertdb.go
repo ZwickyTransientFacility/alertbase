@@ -1,6 +1,7 @@
 package alertdb
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -17,9 +18,9 @@ type Database struct {
 }
 
 type Blobstore interface {
-	Read(url string) (*schema.Alert, error)
-	ReadMany(urls []string) *blobstore.AlertIterator
-	Write(*schema.Alert) (url string, err error)
+	Read(ctx context.Context, url string) (*schema.Alert, error)
+	ReadMany(ctx context.Context, urls []string) *blobstore.AlertIterator
+	Write(context.Context, *schema.Alert) (url string, err error)
 }
 
 func NewS3Database(indexDBPath string, s3Bucket string, s3Client s3iface.S3API) (*Database, error) {
@@ -40,14 +41,14 @@ func NewGoogleCloudDatabase(indexDBPath string, gcsBucket string, gcsClient *sto
 	return &Database{index: indexDB, blobs: blobs}, nil
 }
 
-func (db *Database) Add(a *schema.Alert) error {
+func (db *Database) Add(ctx context.Context, a *schema.Alert) error {
 	log.Printf("adding alert id=%v", a.Candid)
-	url, err := db.blobs.Write(a)
+	url, err := db.blobs.Write(ctx, a)
 	if err != nil {
 		return fmt.Errorf("unable to add alert to blobstore: %w", err)
 	}
 	log.Printf("adding alert id=%v  url=%v", a.Candid, url)
-	err = db.index.Add(a, url)
+	err = db.index.Add(ctx, a, url)
 	if err != nil {
 		return fmt.Errorf("unable to add alert to indexDB: %w", err)
 	}
@@ -55,22 +56,22 @@ func (db *Database) Add(a *schema.Alert) error {
 	return nil
 }
 
-func (db *Database) GetByCandidateID(id uint64) (*schema.Alert, error) {
-	url, err := db.index.GetByCandidateID(id)
+func (db *Database) GetByCandidateID(ctx context.Context, id uint64) (*schema.Alert, error) {
+	url, err := db.index.GetByCandidateID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return db.blobs.Read(url)
+	return db.blobs.Read(ctx, url)
 }
 
-func (db *Database) GetByObjectID(id string) ([]*schema.Alert, error) {
-	urls, err := db.index.GetByObjectID(id)
+func (db *Database) GetByObjectID(ctx context.Context, id string) ([]*schema.Alert, error) {
+	urls, err := db.index.GetByObjectID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	alerts := make([]*schema.Alert, len(urls))
 	for i, u := range urls {
-		alerts[i], err = db.blobs.Read(u)
+		alerts[i], err = db.blobs.Read(ctx, u)
 		if err != nil {
 			return nil, err
 		}
@@ -78,13 +79,13 @@ func (db *Database) GetByObjectID(id string) ([]*schema.Alert, error) {
 	return alerts, nil
 }
 
-func (db *Database) GetByTimerange(start, end float64) ([]*schema.Alert, error) {
-	urls, err := db.index.GetByTimerange(start, end)
+func (db *Database) GetByTimerange(ctx context.Context, start, end float64) ([]*schema.Alert, error) {
+	urls, err := db.index.GetByTimerange(ctx, start, end)
 	if err != nil {
 		return nil, err
 	}
 	alerts := make([]*schema.Alert, len(urls))
-	iterator := db.blobs.ReadMany(urls)
+	iterator := db.blobs.ReadMany(ctx, urls)
 	i := 0
 	for iterator.Next() {
 		alerts[i] = iterator.Value()
@@ -96,13 +97,13 @@ func (db *Database) GetByTimerange(start, end float64) ([]*schema.Alert, error) 
 	return alerts, nil
 }
 
-func (db *Database) StreamByTimerange(start, end float64, ch chan *schema.Alert) error {
+func (db *Database) StreamByTimerange(ctx context.Context, start, end float64, ch chan *schema.Alert) error {
 	defer close(ch)
-	urls, err := db.index.GetByTimerange(start, end)
+	urls, err := db.index.GetByTimerange(ctx, start, end)
 	if err != nil {
 		return err
 	}
-	iterator := db.blobs.ReadMany(urls)
+	iterator := db.blobs.ReadMany(ctx, urls)
 	for iterator.Next() {
 		ch <- iterator.Value()
 	}

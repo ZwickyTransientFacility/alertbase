@@ -2,6 +2,7 @@ package blobstore
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -32,7 +33,7 @@ func NewS3Blobstore(s3 s3iface.S3API, bucket string) *S3Blobstore {
 	}
 }
 
-func (s *S3Blobstore) Write(a *schema.Alert) (string, error) {
+func (s *S3Blobstore) Write(ctx context.Context, a *schema.Alert) (string, error) {
 	contents := bytes.NewBuffer(nil)
 	err := a.Serialize(contents)
 	if err != nil {
@@ -41,7 +42,7 @@ func (s *S3Blobstore) Write(a *schema.Alert) (string, error) {
 
 	key := fmt.Sprintf("alerts/v1/%s/%d", a.ObjectId, a.Candid)
 	url := fmt.Sprintf("s3://%s/%s", s.bucket, key)
-	_, err = s.s3.PutObject(&s3.PutObjectInput{
+	_, err = s.s3.PutObjectWithContext(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 		Body:   bytes.NewReader(contents.Bytes()),
@@ -76,14 +77,14 @@ func (s *S3Blobstore) parseURL(url string) (bucket, key string, err error) {
 	return bucket, key, nil
 }
 
-func (s *S3Blobstore) Read(url string) (*schema.Alert, error) {
+func (s *S3Blobstore) Read(ctx context.Context, url string) (*schema.Alert, error) {
 	bucket, key, err := s.parseURL(url)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse URL: %w", err)
 	}
 	worker := s.workerPool.take()
 	defer s.workerPool.giveBack(worker)
-	resp, err := worker.GetObject(&s3.GetObjectInput{
+	resp, err := worker.GetObjectWithContext(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	})
@@ -94,7 +95,7 @@ func (s *S3Blobstore) Read(url string) (*schema.Alert, error) {
 	return schema.DeserializeAlert(resp.Body)
 }
 
-func (s *S3Blobstore) ReadMany(urls []string) *AlertIterator {
+func (s *S3Blobstore) ReadMany(ctx context.Context, urls []string) *AlertIterator {
 	ai := &AlertIterator{
 		alerts: make(chan *schema.Alert, s.workerPool.parallelism),
 		errors: make(chan error, s.workerPool.parallelism),
@@ -115,7 +116,7 @@ func (s *S3Blobstore) ReadMany(urls []string) *AlertIterator {
 			defer s.workerPool.giveBack(worker)
 
 			log.Printf("fetching %v", url)
-			resp, err := worker.GetObject(&s3.GetObjectInput{
+			resp, err := worker.GetObjectWithContext(ctx, &s3.GetObjectInput{
 				Bucket: aws.String(bucket),
 				Key:    aws.String(key),
 			})

@@ -1,6 +1,7 @@
 package indexdb
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -50,7 +51,7 @@ func NewIndexDB(dbPath string) (*IndexDB, error) {
 	}, nil
 }
 
-func (db *IndexDB) Add(a *schema.Alert, url string) error {
+func (db *IndexDB) Add(ctx context.Context, a *schema.Alert, url string) error {
 	id := byteID(a)
 	err := db.byCandidateID.Put(id, []byte(url), nil)
 	if err != nil {
@@ -71,7 +72,7 @@ func (db *IndexDB) Add(a *schema.Alert, url string) error {
 }
 
 // GetByCandidateID gets the URL holding data for a particular alert by ID.
-func (db *IndexDB) GetByCandidateID(id uint64) (url string, err error) {
+func (db *IndexDB) GetByCandidateID(ctx context.Context, id uint64) (url string, err error) {
 	have, err := db.byCandidateID.Get(uint64ToBytes(id), nil)
 	if err != nil {
 		return "", err
@@ -81,7 +82,7 @@ func (db *IndexDB) GetByCandidateID(id uint64) (url string, err error) {
 
 // GetByObjectID gets all URLs for alerts associated with a particular Object by
 // ID.
-func (db *IndexDB) GetByObjectID(id string) (urls []string, err error) {
+func (db *IndexDB) GetByObjectID(ctx context.Context, id string) (urls []string, err error) {
 	candidates, err := db.byObjectID.Get([]byte(id), nil)
 	if err != nil {
 		return nil, err
@@ -89,7 +90,7 @@ func (db *IndexDB) GetByObjectID(id string) (urls []string, err error) {
 	candidateIDs := packedUint64s(candidates)
 	urls = make([]string, candidateIDs.Len())
 	for i, id := range candidateIDs.Values() {
-		urls[i], err = db.GetByCandidateID(id)
+		urls[i], err = db.GetByCandidateID(ctx, id)
 		if err != nil {
 			return nil, fmt.Errorf("unable to resolve candidate ID %d to a URL: %w", id, err)
 		}
@@ -98,7 +99,7 @@ func (db *IndexDB) GetByObjectID(id string) (urls []string, err error) {
 }
 
 // GetByTimerange returns the URLs for alerts between two julian dates.
-func (db *IndexDB) GetByTimerange(start, end float64) (urls []string, err error) {
+func (db *IndexDB) GetByTimerange(ctx context.Context, start, end float64) (urls []string, err error) {
 	byterange := &util.Range{
 		Start: uint64ToBytes(jd2unix(start)),
 		Limit: uint64ToBytes(jd2unix(end)),
@@ -119,7 +120,7 @@ func (db *IndexDB) GetByTimerange(start, end float64) (urls []string, err error)
 		log.Printf("got matching key: %v", iterator.Key())
 		log.Printf("%d values found: %v", ids.Len())
 		for _, id := range ids.Values() {
-			url, err := db.GetByCandidateID(id)
+			url, err := db.GetByCandidateID(ctx, id)
 			if err != nil {
 				return nil, fmt.Errorf("unable to resolve candidate ID %d to a URL: %w", id, err)
 			}

@@ -40,6 +40,7 @@ func main() {
 		fatal(err)
 	}
 
+	ctx := context.Background()
 	var db *alertdb.Database
 	switch *platform {
 	case "aws":
@@ -49,7 +50,6 @@ func main() {
 			fatal(err)
 		}
 	case "google":
-		ctx := context.Background()
 		gcs, err := storage.NewClient(ctx)
 		if err != nil {
 			fatal(err)
@@ -65,11 +65,11 @@ func main() {
 
 	switch query {
 	case candidate:
-		err = queryCandidate(db, *candidateID)
+		err = queryCandidate(ctx, db, *candidateID)
 	case object:
-		err = queryObject(db, *objectID)
+		err = queryObject(ctx, db, *objectID)
 	case timerange:
-		err = queryTimerange(db, *timeStart, *timeEnd, *timeFormat)
+		err = queryTimerange(ctx, db, *timeStart, *timeEnd, *timeFormat)
 	}
 	if err != nil {
 		fatal(err)
