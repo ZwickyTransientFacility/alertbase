@@ -5,13 +5,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 
 	"cloud.google.com/go/storage"
 	"github.com/ZwickyTransientFacility/alertbase/alertdb"
+	"github.com/ZwickyTransientFacility/alertbase/internal/ctxlog"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"go.uber.org/zap"
 )
 
 var (
@@ -30,36 +31,52 @@ var (
 
 func main() {
 	flag.Parse()
+
+	ctx := context.Background()
+	log, err := zap.NewDevelopment()
+	if err != nil {
+		panic(err)
+	}
+	ctx = ctxlog.WithLog(ctx, log)
+	log.Debug("starting up",
+		zap.Stringp("-object", objectID),
+		zap.Uint64p("-candidate", candidateID),
+		zap.Stringp("-time-start", timeStart),
+		zap.Stringp("-time-end", timeEnd),
+		zap.Stringp("-time-format", timeFormat),
+		zap.Stringp("-db", dbPath),
+		zap.Stringp("-bucket", bucket),
+		zap.Stringp("-platform", platform),
+	)
+
 	query, err := parseQueryType()
 	if err != nil {
-		fatal(err)
+		fatal(log, err)
 	}
 
 	session, err := session.NewSession()
 	if err != nil {
-		fatal(err)
+		fatal(log, err)
 	}
-
-	ctx := context.Background()
 	var db *alertdb.Database
 	switch *platform {
 	case "aws":
 		s3 := s3.New(session, aws.NewConfig().WithRegion("us-west-2"))
 		db, err = alertdb.NewS3Database(*dbPath, *bucket, s3)
 		if err != nil {
-			fatal(err)
+			fatal(log, err)
 		}
 	case "google":
 		gcs, err := storage.NewClient(ctx)
 		if err != nil {
-			fatal(err)
+			fatal(log, err)
 		}
 		db, err = alertdb.NewGoogleCloudDatabase(*dbPath, *bucket, gcs)
 		if err != nil {
-			fatal(err)
+			fatal(log, err)
 		}
 	default:
-		fatal(errors.New("invalid platform"))
+		fatal(log, errors.New("invalid platform"))
 	}
 	defer db.Close()
 
@@ -72,12 +89,12 @@ func main() {
 		err = queryTimerange(ctx, db, *timeStart, *timeEnd, *timeFormat)
 	}
 	if err != nil {
-		fatal(err)
+		fatal(log, err)
 	}
 }
 
-func fatal(err error) {
-	log.Fatalf("FATAL: %v", err)
+func fatal(log *zap.Logger, err error) {
+	log.Fatal("Fatal error", zap.Error(err))
 }
 
 type queryType int

@@ -3,13 +3,14 @@ package indexdb
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
+	"github.com/ZwickyTransientFacility/alertbase/internal/ctxlog"
 	"github.com/ZwickyTransientFacility/alertbase/schema"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
+	"go.uber.org/zap"
 )
 
 type IndexDB struct {
@@ -73,10 +74,12 @@ func (db *IndexDB) Add(ctx context.Context, a *schema.Alert, url string) error {
 
 // GetByCandidateID gets the URL holding data for a particular alert by ID.
 func (db *IndexDB) GetByCandidateID(ctx context.Context, id uint64) (url string, err error) {
+	ctxlog.Debug(ctx, "looking up candidate URL", zap.Uint64("id", id))
 	have, err := db.byCandidateID.Get(uint64ToBytes(id), nil)
 	if err != nil {
 		return "", err
 	}
+	ctxlog.Debug(ctx, "retrieved candidate URL", zap.Uint64("id", id), zap.String("url", string(have)))
 	return string(have), nil
 }
 
@@ -87,8 +90,10 @@ func (db *IndexDB) GetByObjectID(ctx context.Context, id string) (urls []string,
 	if err != nil {
 		return nil, err
 	}
+	ctxlog.Debug(ctx, "retrieved packed candidate data", zap.Binary("candidates", candidates))
 	candidateIDs := packedUint64s(candidates)
 	urls = make([]string, candidateIDs.Len())
+	ctxlog.Debug(ctx, "unpacked into IDs", zap.Int("n-candidates", candidateIDs.Len()))
 	for i, id := range candidateIDs.Values() {
 		urls[i], err = db.GetByCandidateID(ctx, id)
 		if err != nil {
@@ -100,13 +105,22 @@ func (db *IndexDB) GetByObjectID(ctx context.Context, id string) (urls []string,
 
 // GetByTimerange returns the URLs for alerts between two julian dates.
 func (db *IndexDB) GetByTimerange(ctx context.Context, start, end float64) (urls []string, err error) {
+	startUnix := jd2unix(start)
+	endUnix := jd2unix(end)
 	byterange := &util.Range{
-		Start: uint64ToBytes(jd2unix(start)),
-		Limit: uint64ToBytes(jd2unix(end)),
+		Start: uint64ToBytes(startUnix),
+		Limit: uint64ToBytes(endUnix),
 	}
-	log.Printf("searching in byte range %v to %v", byterange.Start, byterange.Limit)
+	ctxlog.Debug(ctx, "searching in byte range",
+		zap.Float64("start-float", start),
+		zap.Float64("end-float", end),
+		zap.Uint64("start-unix", startUnix),
+		zap.Uint64("end-unix", endUnix),
+		zap.Binary("start-binary", byterange.Start),
+		zap.Binary("end-binary", byterange.Limit),
+	)
 	iterator := db.byTimestamp.NewIterator(byterange, nil)
-	log.Printf("iterator created")
+	ctxlog.Debug(ctx, "iterator created")
 	defer iterator.Release()
 
 	err = iterator.Error()
@@ -117,18 +131,20 @@ func (db *IndexDB) GetByTimerange(ctx context.Context, start, end float64) (urls
 	urls = make([]string, 0)
 	for iterator.Next() {
 		ids := packedUint64s(iterator.Value())
-		log.Printf("got matching key: %v", iterator.Key())
-		log.Printf("%d values found: %v", ids.Len())
+		ctxlog.Debug(ctx, "iterator step",
+			zap.Binary("key", iterator.Key()),
+			zap.Binary("value", iterator.Value()),
+			zap.Int("size", ids.Len()),
+		)
 		for _, id := range ids.Values() {
 			url, err := db.GetByCandidateID(ctx, id)
 			if err != nil {
 				return nil, fmt.Errorf("unable to resolve candidate ID %d to a URL: %w", id, err)
 			}
-			log.Printf("url=%q", url)
 			urls = append(urls, url)
 		}
 	}
-	log.Printf("iteration complete")
+	ctxlog.Debug(ctx, "iteration complete")
 
 	err = iterator.Error()
 	if err != nil {

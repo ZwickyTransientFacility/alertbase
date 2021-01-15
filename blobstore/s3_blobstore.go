@@ -5,14 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 
+	"github.com/ZwickyTransientFacility/alertbase/internal/ctxlog"
 	"github.com/ZwickyTransientFacility/alertbase/schema"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"go.uber.org/zap"
 )
 
 // parallelism controls how many concurrent requests to S3 are permitted
@@ -42,6 +43,10 @@ func (s *S3Blobstore) Write(ctx context.Context, a *schema.Alert) (string, error
 
 	key := fmt.Sprintf("alerts/v1/%s/%d", a.ObjectId, a.Candid)
 	url := fmt.Sprintf("s3://%s/%s", s.bucket, key)
+	ctxlog.Debug(ctx, "storing alert",
+		zap.Int("alert-size", contents.Len()),
+		zap.String("s3-key", key),
+	)
 	_, err = s.s3.PutObjectWithContext(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
@@ -82,8 +87,13 @@ func (s *S3Blobstore) Read(ctx context.Context, url string) (*schema.Alert, erro
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse URL: %w", err)
 	}
+	ctxlog.Debug(ctx, "claiming workerpool worker")
 	worker := s.workerPool.take()
 	defer s.workerPool.giveBack(worker)
+	ctxlog.Debug(ctx, "retrieving S3 object",
+		zap.String("bucket", bucket),
+		zap.String("key", key),
+	)
 	resp, err := worker.GetObjectWithContext(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -91,6 +101,8 @@ func (s *S3Blobstore) Read(ctx context.Context, url string) (*schema.Alert, erro
 	if err != nil {
 		return nil, fmt.Errorf("unable to find alert in S3: %w", err)
 	}
+	ctxlog.Debug(ctx, "retrieved S3 response",
+		zap.Int64p("response-size", resp.ContentLength))
 	defer resp.Body.Close()
 	return schema.DeserializeAlert(resp.Body)
 }
@@ -115,7 +127,7 @@ func (s *S3Blobstore) ReadMany(ctx context.Context, urls []string) *AlertIterato
 			worker := s.workerPool.take()
 			defer s.workerPool.giveBack(worker)
 
-			log.Printf("fetching %v", url)
+			ctxlog.Debug(ctx, "fetching url", zap.String("url", url))
 			resp, err := worker.GetObjectWithContext(ctx, &s3.GetObjectInput{
 				Bucket: aws.String(bucket),
 				Key:    aws.String(key),
@@ -124,6 +136,8 @@ func (s *S3Blobstore) ReadMany(ctx context.Context, urls []string) *AlertIterato
 				ai.errors <- err
 				return
 			}
+			ctxlog.Debug(ctx, "retrieved S3 response",
+				zap.Int64p("response-size", resp.ContentLength))
 
 			defer resp.Body.Close()
 			alert, err := schema.DeserializeAlert(resp.Body)

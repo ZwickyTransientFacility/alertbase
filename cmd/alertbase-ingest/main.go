@@ -4,15 +4,16 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/ZwickyTransientFacility/alertbase/alertdb"
+	"github.com/ZwickyTransientFacility/alertbase/internal/ctxlog"
 	"github.com/ZwickyTransientFacility/alertbase/schema"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"go.uber.org/zap"
 )
 
 const (
@@ -32,16 +33,29 @@ func main() {
 		printusage()
 		os.Exit(1)
 	}
+
+	log, err := zap.NewDevelopment()
+	defer log.Sync()
+
 	db := os.Args[1]
 	glob := os.Args[2]
+
+	log.Info("ingesting",
+		zap.String("db", db),
+		zap.String("glob", glob),
+	)
+
 	alertDB, err := initDB(db)
 	if err != nil {
-		fatal(err)
+		fatal(log, err)
 	}
 	defer alertDB.Close()
-	err = ingestFiles(glob, alertDB)
+
+	ctx := context.Background()
+	ctx = ctxlog.WithLog(ctx, log)
+	err = ingestFiles(ctx, glob, alertDB)
 	if err != nil {
-		fatal(err)
+		fatal(log, err)
 	}
 }
 
@@ -60,19 +74,19 @@ func initDB(db string) (*alertdb.Database, error) {
 
 }
 
-func ingestFiles(glob string, db *alertdb.Database) error {
-	ctx := context.Background()
-
+func ingestFiles(ctx context.Context, glob string, db *alertdb.Database) error {
 	files, err := filepath.Glob(glob)
 	if err != nil {
 		return err
 	}
+	ctxlog.Info(ctx, "found files", zap.Int("n-files", len(files)))
 	for _, f := range files {
+		ctxlog.Info(ctx, "reading file", zap.String("filename", f))
 		alerts, err := alertsFromFile(f)
 		if err != nil {
 			return err
 		}
-
+		ctxlog.Info(ctx, "found alerts", zap.Int("n-alerts", len(alerts)))
 		for _, a := range alerts {
 			err = db.Add(ctx, a)
 			if err != nil {
@@ -106,6 +120,6 @@ func alertsFromFile(filepath string) ([]*schema.Alert, error) {
 	return alerts, nil
 }
 
-func fatal(err error) {
-	log.Fatalf("FATAL: %v", err)
+func fatal(log *zap.Logger, err error) {
+	log.Fatal("fatal error", zap.Error(err))
 }
