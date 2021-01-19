@@ -48,6 +48,17 @@ func byteTimestamp(a *schema.Alert) []byte {
 	return uint64ToBytes(jd2unix(a.Candidate.Jd))
 }
 
+func byteInt64(v int64) []byte {
+	buf := make([]byte, binary.MaxVarintLen64)
+	n := binary.PutVarint(buf, v)
+	return buf[:n]
+}
+
+func int64FromBytes(buf []byte) int64 {
+	v, _ := binary.Varint(buf)
+	return v
+}
+
 func byteHEALPixel(ctx context.Context, a *schema.Alert, m *healpix.HEALPixMapper) []byte {
 	ctxlog.Debug(ctx, "looking up HEALPixel",
 		zap.Float64("Ra", a.Candidate.Ra),

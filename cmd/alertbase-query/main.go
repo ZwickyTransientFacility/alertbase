@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 
-	"cloud.google.com/go/storage"
 	"github.com/ZwickyTransientFacility/alertbase/alertdb"
 	"github.com/ZwickyTransientFacility/alertbase/internal/ctxlog"
 	"github.com/aws/aws-sdk-go/aws"
@@ -66,15 +65,15 @@ func main() {
 		if err != nil {
 			fatal(log, err)
 		}
-	case "google":
-		gcs, err := storage.NewClient(ctx)
-		if err != nil {
-			fatal(log, err)
-		}
-		db, err = alertdb.NewGoogleCloudDatabase(*dbPath, *bucket, gcs)
-		if err != nil {
-			fatal(log, err)
-		}
+	// case "google":
+	// 	gcs, err := storage.NewClient(ctx)
+	// 	if err != nil {
+	// 		fatal(log, err)
+	// 	}
+	// 	db, err = alertdb.NewGoogleCloudDatabase(*dbPath, *bucket, gcs)
+	// 	if err != nil {
+	// 		fatal(log, err)
+	// 	}
 	default:
 		fatal(log, errors.New("invalid platform"))
 	}

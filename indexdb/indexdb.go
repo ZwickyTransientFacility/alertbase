@@ -3,6 +3,7 @@ package indexdb
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -35,43 +36,43 @@ func NewIndexDB(dbPath string, healpixOrder int) (*IndexDB, error) {
 		return nil, err
 	}
 
-	candidateDB, err := leveldb.OpenFile(filepath.Join(dbPath, "candidates"), nil)
+	db := &IndexDB{}
+	db.healpixMapper, err = healpix.NewHEALPixMapper(healpixOrder, healpix.Nest)
 	if err != nil {
-		return nil, fmt.Errorf("unable to open candidates database: %w", err)
+		return nil, err
 	}
-	objectDB, err := leveldb.OpenFile(filepath.Join(dbPath, "objects"), nil)
+
+	// Keep track of all DBs we open as we go so they can be closed safely in case
+	// of error.
+	var openDBs []io.Closer
+	openDB := func(name string, prevErr error) (*leveldb.DB, error) {
+		// Use a sticky previous error to reduce noise.
+		if prevErr != nil {
+			return nil, prevErr
+		}
+
+		db, err := leveldb.OpenFile(filepath.Join(dbPath, name), nil)
+		if err != nil {
+			return nil, fmt.Errorf("unable to open %s database: %w", name, err)
+		}
+
+		openDBs = append(openDBs, db)
+		return db, nil
+	}
+
+	db.byCandidateID, err = openDB("candidates", err)
+	db.byObjectID, err = openDB("objects", err)
+	db.byTimestamp, err = openDB("timestamps", err)
+	db.byHealpix, err = openDB("healpixels", err)
+
 	if err != nil {
-		candidateDB.Close()
-		return nil, fmt.Errorf("unable to open object database: %w", err)
+		for _, c := range openDBs {
+			c.Close()
+		}
+		return nil, err
 	}
-	timestampDB, err := leveldb.OpenFile(filepath.Join(dbPath, "timestamps"), nil)
-	if err != nil {
-		candidateDB.Close()
-		objectDB.Close()
-		return nil, fmt.Errorf("unable to open timestamp database: %w", err)
-	}
-	healpixDB, err := leveldb.OpenFile(filepath.Join(dbPath, "healpixels"), nil)
-	if err != nil {
-		candidateDB.Close()
-		objectDB.Close()
-		timestampDB.Close()
-		return nil, fmt.Errorf("unable to open healpix database: %w", err)
-	}
-	healpixMapper, err := healpix.NewHEALPixMapper(healpixOrder, healpix.Nest)
-	if err != nil {
-		candidateDB.Close()
-		objectDB.Close()
-		timestampDB.Close()
-		healpixDB.Close()
-		return nil, fmt.Errorf("unable to open healpix mapper: %w", err)
-	}
-	return &IndexDB{
-		byCandidateID: candidateDB,
-		byObjectID:    objectDB,
-		byTimestamp:   timestampDB,
-		byHealpix:     healpixDB,
-		healpixMapper: healpixMapper,
-	}, nil
+
+	return db, nil
 }
 
 func (db *IndexDB) Add(ctx context.Context, a *schema.Alert, url string) error {

@@ -3,8 +3,9 @@ package alertdb
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
-	"cloud.google.com/go/storage"
 	"github.com/ZwickyTransientFacility/alertbase/blobstore"
 	"github.com/ZwickyTransientFacility/alertbase/indexdb"
 	"github.com/ZwickyTransientFacility/alertbase/internal/ctxlog"
@@ -16,48 +17,68 @@ import (
 const healpixOrder = 10
 
 type Database struct {
-	index *indexdb.IndexDB
-	blobs Blobstore
+	dbPath string
+	index  *indexdb.IndexDB
+	blobs  Blobstore
+
+	Meta DBMeta
 }
 
 type Blobstore interface {
 	Read(ctx context.Context, url string) (*schema.Alert, error)
 	ReadMany(ctx context.Context, urls []string) *blobstore.AlertIterator
-	Write(context.Context, *schema.Alert) (url string, err error)
+	Write(context.Context, *schema.Alert) (size int, url string, err error)
 }
 
-func NewS3Database(indexDBPath string, s3Bucket string, s3Client s3iface.S3API) (*Database, error) {
+func NewS3Database(dbPath string, s3Bucket string, s3Client s3iface.S3API) (*Database, error) {
 	blobs := blobstore.NewS3Blobstore(s3Client, s3Bucket)
-	indexDB, err := indexdb.NewIndexDB(indexDBPath, healpixOrder)
+	indexDB, err := indexdb.NewIndexDB(dbPath, healpixOrder)
 	if err != nil {
 		return nil, err
 	}
-	return &Database{index: indexDB, blobs: blobs}, nil
-}
 
-func NewGoogleCloudDatabase(indexDBPath string, gcsBucket string, gcsClient *storage.Client) (*Database, error) {
-	blobs := blobstore.NewCloudStorageBlobstore(gcsClient, gcsBucket)
-	indexDB, err := indexdb.NewIndexDB(indexDBPath, healpixOrder)
+	err = os.MkdirAll(dbPath, 0755)
 	if err != nil {
 		return nil, err
 	}
-	return &Database{index: indexDB, blobs: blobs}, nil
+
+	meta := NewDBMeta()
+	f, err := os.Open(filepath.Join(dbPath, "meta.json"))
+	if err == nil {
+		defer f.Close()
+		err = meta.ReadFrom(f)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &Database{
+		dbPath: dbPath,
+		index:  indexDB,
+		blobs:  blobs,
+		Meta:   *meta,
+	}, nil
 }
 
 func (db *Database) Add(ctx context.Context, a *schema.Alert) error {
 	ctx = ctxlog.WithFields(ctx, zap.Int64("CandID", a.Candid))
 
 	ctxlog.Debug(ctx, "adding alert to blobstore")
-	url, err := db.blobs.Write(ctx, a)
+	size, url, err := db.blobs.Write(ctx, a)
 	if err != nil {
 		return fmt.Errorf("unable to add alert to blobstore: %w", err)
 	}
+	db.Meta.NBytes += size
 
 	ctxlog.Debug(ctx, "adding alert to index", zap.String("url", url))
 	err = db.index.Add(ctx, a, url)
 	if err != nil {
 		return fmt.Errorf("unable to add alert to indexDB: %w", err)
 	}
+
+	db.Meta.NAlerts += 1
+
+	db.Meta.markTimestamps(a)
 
 	ctxlog.Debug(ctx, "alert added")
 	return nil
@@ -135,5 +156,15 @@ func (db *Database) StreamByTimerange(ctx context.Context, start, end float64, c
 }
 
 func (db *Database) Close() error {
+	f, err := os.Create(filepath.Join(db.dbPath, "meta.json"))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	err = db.Meta.WriteTo(f)
+	if err != nil {
+		return err
+	}
 	return db.index.Close()
 }

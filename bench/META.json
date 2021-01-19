@@ -1,0 +1,25 @@
+{
+  "DataVolumeDays": 0,
+  "DataVolumeAlerts": 0,
+  "DataVolumeBytes": 0,
+  "Scheme": 0,
+  "IndexDB": 0,
+  "Blobstore": 0,
+  "Env": 0,
+  "Indexes": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "QueryType": 4,
+  "Query": {
+    "TimeStart": 0,
+    "TimeEnd": 0,
+    "RA": 0,
+    "Dec": 0,
+    "R": 0,
+    "CandidateID": "",
+    "SourceID": 0
+  }
+}

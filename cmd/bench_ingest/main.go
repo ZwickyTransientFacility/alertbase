@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ZwickyTransientFacility/alertbase/alertdb"
+	"github.com/ZwickyTransientFacility/alertbase/benchutil"
 	"github.com/ZwickyTransientFacility/alertbase/internal/ctxlog"
 	"github.com/ZwickyTransientFacility/alertbase/schema"
 	"github.com/aws/aws-sdk-go/aws"
@@ -21,42 +24,51 @@ const (
 	awsRegion = "us-west-2"
 )
 
-func printusage() {
-	fmt.Println(`usage: alertbase-ingest DB-DIR ALERT-FILE-GLOB
-
-DB-DIR should be a leveldb database directory
-ALERT-FILE-GLOB should match avro-encoded files containing one or more alerts`)
-}
+var (
+	srcDir   = flag.String("src-dir", "testdata/*.avro", "directory with tarballs to load from")
+	benchDir = flag.String("bench-dir", "bench", "directory to store benchmarks in")
+	db       = flag.String("db", "alerts.db", "base directory to work from")
+	clean    = flag.Bool("clean", false, "delete database before starting")
+)
 
 func main() {
-	if len(os.Args) != 3 {
-		printusage()
-		os.Exit(1)
-	}
-
+	flag.Parse()
 	log, err := zap.NewDevelopment()
 	defer log.Sync()
-	if err != nil {
-		panic(err)
+
+	if *clean {
+		err = os.RemoveAll(*db)
+		if err != nil {
+			fatal(log, err)
+		}
 	}
 
-	db := os.Args[1]
-	glob := os.Args[2]
-
-	log.Info("ingesting",
-		zap.String("db", db),
-		zap.String("glob", glob),
-	)
-
-	alertDB, err := initDB(db)
+	alertDB, err := initDB(*db)
 	if err != nil {
 		fatal(log, err)
 	}
 	defer alertDB.Close()
+	benchEnv := benchutil.BenchmarkEnvironment{
+		DataVolumeDays:   int64(len(alertDB.Meta.Days)),
+		DataVolumeAlerts: int64(alertDB.Meta.NAlerts),
+		DataVolumeBytes:  int64(alertDB.Meta.NBytes),
+		Scheme:           benchutil.NESTED,
+		IndexDB:          benchutil.LevelDB,
+		Blobstore:        benchutil.S3,
+		Env:              benchutil.Laptop,
+		Indexes:          benchutil.AllIndexTypes,
+		QueryType:        benchutil.Ingest,
+	}
+
+	benchlog, err := benchutil.NewBenchmarkLogger(benchEnv, *benchDir)
+	if err != nil {
+		fatal(log, err)
+	}
+	defer benchlog.Close()
 
 	ctx := context.Background()
 	ctx = ctxlog.WithLog(ctx, log)
-	err = ingestFiles(ctx, glob, alertDB)
+	err = ingestFiles(ctx, *srcDir, alertDB, benchlog)
 	if err != nil {
 		fatal(log, err)
 	}
@@ -77,11 +89,12 @@ func initDB(db string) (*alertdb.Database, error) {
 
 }
 
-func ingestFiles(ctx context.Context, glob string, db *alertdb.Database) error {
+func ingestFiles(ctx context.Context, glob string, db *alertdb.Database, bl *benchutil.BenchmarkLogger) error {
 	files, err := filepath.Glob(glob)
 	if err != nil {
 		return err
 	}
+	bl.ObserveInt(len(files), "n-files")
 	ctxlog.Info(ctx, "found files", zap.Int("n-files", len(files)))
 	for _, f := range files {
 		ctxlog.Info(ctx, "reading file", zap.String("filename", f))
@@ -89,12 +102,15 @@ func ingestFiles(ctx context.Context, glob string, db *alertdb.Database) error {
 		if err != nil {
 			return err
 		}
+		bl.ObserveInt(len(alerts), "n-alerts")
 		ctxlog.Info(ctx, "found alerts", zap.Int("n-alerts", len(alerts)))
 		for _, a := range alerts {
+			start := time.Now()
 			err = db.Add(ctx, a)
 			if err != nil {
 				return err
 			}
+			bl.ObserveDuration(time.Since(start), "add-alert")
 		}
 	}
 	return nil
@@ -124,5 +140,5 @@ func alertsFromFile(filepath string) ([]*schema.Alert, error) {
 }
 
 func fatal(log *zap.Logger, err error) {
-	log.Fatal("fatal error", zap.Error(err))
+	log.WithOptions(zap.AddCallerSkip(1)).Fatal("fatal error", zap.Error(err))
 }

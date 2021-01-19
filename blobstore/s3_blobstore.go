@@ -34,17 +34,18 @@ func NewS3Blobstore(s3 s3iface.S3API, bucket string) *S3Blobstore {
 	}
 }
 
-func (s *S3Blobstore) Write(ctx context.Context, a *schema.Alert) (string, error) {
+func (s *S3Blobstore) Write(ctx context.Context, a *schema.Alert) (int, string, error) {
 	contents := bytes.NewBuffer(nil)
 	err := a.Serialize(contents)
 	if err != nil {
-		return "", fmt.Errorf("unable to serialize alert id=%v: %v", a.ObjectId, err)
+		return 0, "", fmt.Errorf("unable to serialize alert id=%v: %v", a.ObjectId, err)
 	}
 
+	size := contents.Len()
 	key := fmt.Sprintf("alerts/v1/%s/%d", a.ObjectId, a.Candid)
 	url := fmt.Sprintf("s3://%s/%s", s.bucket, key)
 	ctxlog.Debug(ctx, "storing alert",
-		zap.Int("alert-size", contents.Len()),
+		zap.Int("alert-size", size),
 		zap.String("s3-key", key),
 	)
 	_, err = s.s3.PutObjectWithContext(ctx, &s3.PutObjectInput{
@@ -53,10 +54,10 @@ func (s *S3Blobstore) Write(ctx context.Context, a *schema.Alert) (string, error
 		Body:   bytes.NewReader(contents.Bytes()),
 	})
 	if err != nil {
-		return "", fmt.Errorf("unable to add alert to s3: %w", err)
+		return 0, "", fmt.Errorf("unable to add alert to s3: %w", err)
 	}
 
-	return url, nil
+	return size, url, nil
 }
 
 func (s *S3Blobstore) keyFor(a *schema.Alert) string {
