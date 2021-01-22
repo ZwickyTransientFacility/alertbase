@@ -1,4 +1,5 @@
-# Atlas
+# alertbase
+This is an experimental database for ZTF's alerts.
 
 ## Developing
 
@@ -10,6 +11,3 @@ datasets.
 Run `make dev-setup`.
 
 You're good to go!
-
-## Name
-Atlas: The **A**tlas **T**wo-**L**evel **A**lert **S**earch tool.
