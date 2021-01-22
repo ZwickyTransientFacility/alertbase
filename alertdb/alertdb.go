@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ZwickyTransientFacility/alertbase/benchutil"
 	"github.com/ZwickyTransientFacility/alertbase/blobstore"
 	"github.com/ZwickyTransientFacility/alertbase/indexdb"
 	"github.com/ZwickyTransientFacility/alertbase/internal/ctxlog"
@@ -43,13 +44,27 @@ func NewS3Database(dbPath string, s3Bucket string, s3Client s3iface.S3API) (*Dat
 	}
 
 	meta := NewDBMeta()
-	f, err := os.Open(filepath.Join(dbPath, "meta.json"))
+	metaFilePath := filepath.Join(dbPath, "meta.json")
+	f, err := os.Open(metaFilePath)
+
+	// Case 1: meta file exists. Load it.
 	if err == nil {
-		defer f.Close()
 		err = meta.ReadFrom(f)
+	}
+	// Case 2: meta file doesn't exist, so fresh new DB. Create it.
+	if os.IsNotExist(err) {
+		f, err = os.Create(filepath.Join(dbPath, "meta.json"))
 		if err != nil {
 			return nil, err
 		}
+		err = meta.WriteTo(f)
+	}
+	// Case 3: Some error - including maybe from reading or writing above.
+	if err != nil {
+		return nil, err
+	}
+	if err = f.Close(); err != nil {
+		return nil, err
 	}
 
 	return &Database{
@@ -63,20 +78,23 @@ func NewS3Database(dbPath string, s3Bucket string, s3Client s3iface.S3API) (*Dat
 func (db *Database) Add(ctx context.Context, a *schema.Alert) error {
 	ctx = ctxlog.WithFields(ctx, zap.Int64("CandID", a.Candid))
 
+	done, _ := benchutil.StartObservation(ctx, "blobstore-write", "alertdb")
 	ctxlog.Debug(ctx, "adding alert to blobstore")
 	size, url, err := db.blobs.Write(ctx, a)
 	if err != nil {
 		return fmt.Errorf("unable to add alert to blobstore: %w", err)
 	}
 	db.Meta.NBytes += size
+	done()
 
+	done, _ = benchutil.StartObservation(ctx, "index-write", "alertdb")
 	ctxlog.Debug(ctx, "adding alert to index", zap.String("url", url))
 	err = db.index.Add(ctx, a, url)
 	if err != nil {
 		return fmt.Errorf("unable to add alert to indexDB: %w", err)
 	}
-
 	db.Meta.NAlerts += 1
+	done()
 
 	db.Meta.markTimestamps(a)
 

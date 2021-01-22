@@ -67,7 +67,7 @@ func (bl *BenchmarkLogger) ObserveInt(qty int, label string) error {
 }
 
 func (bl *BenchmarkLogger) ObserveDuration(dur time.Duration, label string) error {
-	return bl.write([]byte(strconv.FormatInt(int64(dur), 10)+"ns"), label)
+	return bl.write([]byte(strconv.FormatInt(int64(dur), 10)), label)
 }
 
 func (bl *BenchmarkLogger) StartObservation(obsLabel, label string) (stopper func() error, err error) {
@@ -78,6 +78,7 @@ func (bl *BenchmarkLogger) StartObservation(obsLabel, label string) (stopper fun
 	}
 	return func() error {
 		dur := time.Since(start)
+		bl.ObserveDuration(dur, obsLabel)
 		msg := fmt.Sprintf("end   %s\t%d", dur)
 		return bl.write([]byte(msg), label)
 	}, nil

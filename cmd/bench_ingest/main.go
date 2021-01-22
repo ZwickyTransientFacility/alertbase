@@ -68,6 +68,7 @@ func main() {
 
 	ctx := context.Background()
 	ctx = ctxlog.WithLog(ctx, log)
+	ctx = benchutil.WithBenchmarker(ctx, benchlog)
 	err = ingestFiles(ctx, *srcDir, alertDB, benchlog)
 	if err != nil {
 		fatal(log, err)

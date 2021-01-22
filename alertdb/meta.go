@@ -19,8 +19,13 @@ type DBMeta struct {
 
 func NewDBMeta() *DBMeta {
 	return &DBMeta{
-		Earliest: time.Unix(1<<63-62135596801, 999999999), // max time
-		Latest:   time.Unix(0, 0),
+		// Initialize Earliest and Latest to plausible Max and Min values - but also
+		// ones that will be happily marshaled by the encoding/json package, which
+		// demands that years be in [0, 9999]. Some normalization for weird calendar
+		// stuff occurs if you try to use the zero time, bringing it to the year -1,
+		// so that one gets set to the year 1000.
+		Earliest: time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC),
+		Latest:   time.Date(1000, 00, 00, 00, 00, 00, 0, time.UTC),
 		Days:     make(DaySet),
 	}
 }
@@ -47,9 +52,10 @@ func (m DBMeta) markTimestamps(a *schema.Alert) {
 		return
 	}
 	t := time.Unix(0, int64(jd2unix(a.Candidate.Jd)))
-	if t.Before(m.Earliest) || m.Earliest.IsZero() {
+	if t.Before(m.Earliest) {
 		m.Earliest = t
-	} else if t.After(m.Latest) {
+	}
+	if t.After(m.Latest) {
 		m.Latest = t
 	}
 	m.Days.Add(t)
@@ -75,6 +81,18 @@ func (ds DaySet) All() []time.Time {
 
 func (ds DaySet) MarshalJSON() ([]byte, error) {
 	return json.Marshal(ds.All())
+}
+
+func (ds DaySet) UnmarshalJSON(v []byte) error {
+	var times []time.Time
+	err := json.Unmarshal(v, &times)
+	if err != nil {
+		return err
+	}
+	for _, t := range times {
+		ds[t] = struct{}{}
+	}
+	return nil
 }
 
 // jd2unix converts a Julian Date to a Unix Nanosecond Timestamp (doesn't
