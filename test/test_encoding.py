@@ -1,5 +1,6 @@
 import alertbase.encoding
 import pytest
+import astropy.time
 
 
 class TestVarintPacking:
@@ -83,3 +84,11 @@ class TestUint64Packing:
     def test_unpack_incomplete_input(self):
         with pytest.raises(Exception):
             alertbase.encoding.unpack_uint64s("1")
+
+
+class TestTimePacking:
+    def test_pack_time_roundtrip(self):
+        time = astropy.time.Time("2010-01-01T00:00:00")
+        packed = alertbase.encoding.pack_time(time)
+        unpacked = alertbase.encoding.unpack_time(packed)
+        assert timeIf  == unpacked

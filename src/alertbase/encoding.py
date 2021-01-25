@@ -1,6 +1,8 @@
 from typing import List, Tuple, Iterator
 import struct
 
+from astropy.time import Time
+
 
 # This file provides a variety of utilities for converting between python data
 # types and byte arrays.
@@ -10,6 +12,9 @@ def pack_uint64(data: int) -> bytes:
     """Pack an integer as a fixed-size 64-bit unsigned integer. This is more
     efficient (both in space and compute) than pack_varint for large integers."""
     return struct.pack(">Q", data)
+
+def unpack_uint64(data: bytes) -> int:
+    return struct.unpack(">Q", data)[0]
 
 
 def pack_uint64s(data: List[int]) -> bytes:
@@ -27,11 +32,16 @@ def unpack_uint64s(data: bytes) -> List[int]:
     return list(x[0] for x in struct.iter_unpack(">Q", data))
 
 
-def pack_jd_timestamp(jd: float) -> bytes:
-    """Pack a julian date as a unix nanosecond timestamp (doesn't attempt to handle
-    leap seconds)
-    """
-    return pack_uint64(int((jd - 2440587.5) * 86400000000000))
+def pack_time(t: Time) -> bytes:
+    return pack_uint64(int(t.unix * 1e9))
+
+
+def unpack_time(data: bytes, format="unix") -> Time:
+    i = unpack_uint64(data)
+    t = Time(i / 1e9, format="unix")
+    if format != "unix":
+        t.format = format
+    return t
 
 
 def _pack_uvarint(n: int) -> bytes:
@@ -121,3 +131,11 @@ def iter_varints(data: bytes) -> Iterator[int]:
         val, n_read = unpack_varint(data[pos:])
         pos += n_read
         yield val
+
+
+def pack_str(val: str) -> bytes:
+    return val.encode("utf-8")
+
+
+def unpack_str(val: bytes) -> str:
+    return val.decode("utf-8", "strict")

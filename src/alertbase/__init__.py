@@ -1,3 +1,3 @@
-from alertbase.db import open_db
+from alertbase.db import Database
 
-__all__ = ["open_db"]
+__all__ = ["Database"]
