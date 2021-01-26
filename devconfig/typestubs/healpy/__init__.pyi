@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import numpy as np
 
 def order2nside(order: int) -> int: ...
@@ -9,5 +9,5 @@ def query_disc(nside: int,
                inclusive: bool = False,
                fact: int = 4,
                nest: bool = False,
-               buff: np.ndarray[np.int64]=None
+               buff: Optional[np.ndarray[np.int64]]=None
 ) -> np.ndarray[np.int64]: ...

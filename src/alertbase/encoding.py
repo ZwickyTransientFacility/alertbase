@@ -15,7 +15,8 @@ def pack_uint64(data: int) -> bytes:
 
 
 def unpack_uint64(data: bytes) -> int:
-    return struct.unpack(">Q", data)[0]
+    val: int = struct.unpack(">Q", data)[0]
+    return val
 
 
 def pack_uint64s(data: List[int]) -> bytes:
@@ -37,7 +38,7 @@ def pack_time(t: Time) -> bytes:
     return pack_uint64(int(t.unix * 1e9))
 
 
-def unpack_time(data: bytes, format="unix") -> Time:
+def unpack_time(data: bytes, format: str = "unix") -> Time:
     i = unpack_uint64(data)
     t = Time(i / 1e9, format="unix")
     if format != "unix":
@@ -59,7 +60,7 @@ def _pack_uvarint(n: int) -> bytes:
     return result
 
 
-def pack_varint(n):
+def pack_varint(n: int) -> bytes:
     """Pack a zig-zag encoded, signed integer into bytes."""
     return _pack_uvarint(_zigzag_encode(n))
 
@@ -72,13 +73,13 @@ def pack_varint_list(data: List[int]) -> bytes:
     return result
 
 
-def _zigzag_encode(x):
+def _zigzag_encode(x: int) -> int:
     if x >= 0:
         return x << 1
     return (x << 1) ^ (~0)
 
 
-def _zigzag_decode(x):
+def _zigzag_decode(x: int) -> int:
     if not x & 0x1:
         return x >> 1
     return (x >> 1) ^ (~0)

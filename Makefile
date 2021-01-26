@@ -42,7 +42,7 @@ format: $(VENV)/black
 		./test
 
 typecheck: $(VENV)/mypy
-	$(VENV)/mypy ./src
+	$(VENV)/mypy --strict ./src
 
 test: $(VENV)/pytest
 	$(VENV)/pytest .

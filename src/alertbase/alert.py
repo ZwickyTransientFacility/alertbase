@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, BinaryIO, Optional
+from typing import Dict, BinaryIO, Optional, Any
 
 from avro.io import BinaryDecoder, DatumReader
 from avro.datafile import META_SCHEMA, DataFileReader
@@ -17,16 +17,16 @@ _optional_int = schema.parse('["null", "int"]')
 
 @dataclass
 class AlertRecord:
-    candidate_id: str
-    object_id: int
+    candidate_id: int
+    object_id: str
     position: SkyCoord
     timestamp: Time
 
     raw_data: Optional[bytes]
-    raw_dict: Optional[Dict]
+    raw_dict: Optional[Dict[str, Any]]
 
     @classmethod
-    def from_dict(cls, d: Dict) -> AlertRecord:
+    def from_dict(cls, d: Dict[str, Any]) -> AlertRecord:
         """
         Constructs an AlertRecord from an avro-style dictionary representing a ZTF
         alert.
@@ -81,8 +81,8 @@ class AlertRecord:
         decoder.skip_utf8()
 
         # Read candidate ID, object ID
-        candidate_id = decoder.read_utf8()
-        object_id = decoder.read_long()
+        object_id = decoder.read_utf8()
+        candidate_id = decoder.read_long()
 
         # Read jd, the julian date of the observation
         jd = decoder.read_double()
