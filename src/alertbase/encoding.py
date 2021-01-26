@@ -13,6 +13,7 @@ def pack_uint64(data: int) -> bytes:
     efficient (both in space and compute) than pack_varint for large integers."""
     return struct.pack(">Q", data)
 
+
 def unpack_uint64(data: bytes) -> int:
     return struct.unpack(">Q", data)[0]
 

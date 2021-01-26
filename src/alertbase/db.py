@@ -27,7 +27,7 @@ class Database:
 
     order: int
 
-    def __init__(self, db_path: str, create_if_missing: bool=False):
+    def __init__(self, db_path: str, create_if_missing: bool = False):
         self.db_root = pathlib.Path(db_path)
 
         if create_if_missing:

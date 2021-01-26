@@ -91,4 +91,4 @@ class TestTimePacking:
         time = astropy.time.Time("2010-01-01T00:00:00")
         packed = alertbase.encoding.pack_time(time)
         unpacked = alertbase.encoding.unpack_time(packed)
-        assert timeIf  == unpacked
+        assert time == unpacked
