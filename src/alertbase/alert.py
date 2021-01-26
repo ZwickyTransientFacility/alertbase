@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, BinaryIO, Optional, Any
+from typing import Dict, Optional, Any, IO
 
 from avro.io import BinaryDecoder, DatumReader
 from avro.datafile import META_SCHEMA, DataFileReader
@@ -49,7 +49,7 @@ class AlertRecord:
         )
 
     @classmethod
-    def from_file_safe(cls, fp: BinaryIO) -> AlertRecord:
+    def from_file_safe(cls, fp: IO[bytes]) -> AlertRecord:
         """ Read from an alert file stored on disk. """
         df = DataFileReader(fp, DatumReader())
         alert_dict = next(df)
@@ -59,7 +59,7 @@ class AlertRecord:
         return alert
 
     @classmethod
-    def from_file_unsafe(cls, fp: BinaryIO) -> AlertRecord:
+    def from_file_unsafe(cls, fp: IO[bytes]) -> AlertRecord:
         """Read from an alert file stored on disk, recklessly making assumptions about
         its schema. This is *much* faster (~20-50x) than the safe call, but can
         yield errors, or severely incorrect data in the worst case.

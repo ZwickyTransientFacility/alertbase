@@ -1,3 +1,3 @@
-from alertbase.db import Database
+from alertbase.db import IndexDB
 
-__all__ = ["Database"]
+__all__ = ["IndexDB"]

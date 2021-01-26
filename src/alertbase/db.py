@@ -18,7 +18,7 @@ from .encoding import (
 )
 
 
-class Database:
+class IndexDB:
     db_root: pathlib.Path
     objects: plyvel.DB
     candidates: plyvel.DB
