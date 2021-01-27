@@ -10,10 +10,9 @@ def iterate_tarfile(tarfile_path: pathlib.Path) -> Iterator[AlertRecord]:
     tarball should be gzipped, and contain individual alert files.
     """
     with tarfile.open(tarfile_path, mode="r:gz") as tf:
-        member = tf.next()
-        while member is not None:
-            buffer = tf.extractfile(member)
-            assert buffer is not None
-            ar = AlertRecord.from_file_unsafe(buffer)
+        for member in tf.getmembers():
+            buf = tf.extractfile(member)
+            assert buf is not None
+            ar = AlertRecord.from_file_unsafe(buf)
             yield ar
-            member = tf.next()
+            buf.close()

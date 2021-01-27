@@ -1,1 +1,2 @@
 testdata/leveldbs/** filter=lfs diff=lfs merge=lfs -text
+testdata/alertfiles/ztf_public_20210120.tar.gz filter=lfs diff=lfs merge=lfs -text

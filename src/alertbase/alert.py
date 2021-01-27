@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Dict, Optional, Any, IO
+import io
 
 from avro.io import BinaryDecoder, DatumReader
 from avro.datafile import META_SCHEMA, DataFileReader
@@ -51,11 +52,13 @@ class AlertRecord:
     @classmethod
     def from_file_safe(cls, fp: IO[bytes]) -> AlertRecord:
         """ Read from an alert file stored on disk. """
-        df = DataFileReader(fp, DatumReader())
-        alert_dict = next(df)
-        alert = cls.from_dict(alert_dict)
-        fp.seek(0)
-        alert.raw_data = fp.read()
+        # Save a copy of the raw bytes
+        raw_data = fp.read()
+        buf = io.BytesIO(raw_data)
+        with DataFileReader(buf, DatumReader()) as df:
+            alert_dict = next(df)
+            alert = cls.from_dict(alert_dict)
+        alert.raw_data = raw_data
         return alert
 
     @classmethod
@@ -65,7 +68,11 @@ class AlertRecord:
         yield errors, or severely incorrect data in the worst case.
 
         """
-        decoder = BinaryDecoder(fp)
+        # Save a copy of the raw bytes
+        raw_data = fp.read()
+        buf = io.BytesIO(raw_data)
+
+        decoder = BinaryDecoder(buf)
         dr = DatumReader()
         # Skip the file header
         dr.skip_record(META_SCHEMA, decoder)
@@ -108,8 +115,6 @@ class AlertRecord:
         dec = decoder.read_double()
         pos = SkyCoord(ra=ra, dec=dec, unit="deg")
 
-        fp.seek(0)
-        raw_data = fp.read()
         return AlertRecord(
             object_id=object_id,
             candidate_id=candidate_id,
