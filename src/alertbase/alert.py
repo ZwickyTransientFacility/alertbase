@@ -7,6 +7,7 @@ from avro.datafile import META_SCHEMA, DataFileReader
 from avro import schema
 
 import fastavro
+import json
 
 from dataclasses import dataclass
 from astropy.coordinates import SkyCoord
@@ -14,10 +15,20 @@ from astropy.time import Time
 
 from alertbase import alert_schemas
 
-_optional_float = schema.parse('["null", "float"]')
-_optional_string = schema.parse('["null", "string"]')
-_optional_long = schema.parse('["null", "long"]')
-_optional_int = schema.parse('["null", "int"]')
+_optional_float_schema = ["null", "float"]
+_optional_float_avro = schema.parse(json.dumps(_optional_float_schema))
+_optional_float_fastavro = fastavro.parse_schema(_optional_float_schema)
+_optional_string_schema = ["null", "string"]
+_optional_string_avro = schema.parse(json.dumps(_optional_string_schema))
+_optional_string_fastavro = fastavro.parse_schema(_optional_string_schema)
+_optional_long_schema = ["null", "long"]
+_optional_long_avro = schema.parse(json.dumps(_optional_long_schema))
+_optional_long_fastavro = fastavro.parse_schema(_optional_long_schema)
+_optional_int_schema = ["null", "int"]
+_optional_int_avro = schema.parse(json.dumps(_optional_int_schema))
+_optional_int_fastavro = fastavro.parse_schema(_optional_int_schema)
+
+_fastavro_META_SCHEMA = fastavro.parse_schema(META_SCHEMA.to_json())
 
 
 @dataclass
@@ -90,18 +101,18 @@ class AlertRecord:
         # Skip many fields:
         decoder.skip_int()  # fid
         decoder.skip_long()  # pid
-        dr.skip_union(_optional_float, decoder)  # diffmaglim
-        dr.skip_union(_optional_string, decoder)  # pdiffimfilename
-        dr.skip_union(_optional_string, decoder)  # programpi
+        dr.skip_union(_optional_float_avro, decoder)  # diffmaglim
+        dr.skip_union(_optional_string_avro, decoder)  # pdiffimfilename
+        dr.skip_union(_optional_string_avro, decoder)  # programpi
         decoder.skip_int()  # programid
         decoder.skip_long()  # candid
         decoder.skip_utf8()  # isdiffpos
-        dr.skip_union(_optional_long, decoder)  # tblid
-        dr.skip_union(_optional_int, decoder)  # nid
-        dr.skip_union(_optional_int, decoder)  # rcid
-        dr.skip_union(_optional_int, decoder)  # field
-        dr.skip_union(_optional_float, decoder)  # xpos
-        dr.skip_union(_optional_float, decoder)  # ypos
+        dr.skip_union(_optional_long_avro, decoder)  # tblid
+        dr.skip_union(_optional_int_avro, decoder)  # nid
+        dr.skip_union(_optional_int_avro, decoder)  # rcid
+        dr.skip_union(_optional_int_avro, decoder)  # field
+        dr.skip_union(_optional_float_avro, decoder)  # xpos
+        dr.skip_union(_optional_float_avro, decoder)  # ypos
 
         ra = decoder.read_double()
         dec = decoder.read_double()
@@ -152,6 +163,64 @@ class AlertRecord:
         alert = cls.from_dict(alert_dict)
         alert.raw_data = raw_data
         return alert
+
+    @classmethod
+    def from_file_fastavro_unsafe(cls, fp: IO[bytes]) -> AlertRecord:
+        import fastavro._read
+
+        # Save a copy of the raw bytes
+        raw_data = fp.read()
+        buf = io.BytesIO(raw_data)
+
+        # Skip the file header
+        fastavro._read.skip_record(buf, _fastavro_META_SCHEMA, {})
+
+        # Num objects in the block
+        block_count = fastavro._read.read_long(buf)
+        assert block_count == 1
+        # Size in bytes of the serialized objects in the block
+        _ = fastavro._read.skip_long(buf)
+
+        # Skip schemavsn, publisher
+        fastavro._read.skip_utf8(buf)
+        fastavro._read.skip_utf8(buf)
+
+        # Read candidate ID, object ID
+        object_id = fastavro._read.read_utf8(buf)
+        candidate_id = fastavro._read.read_long(buf)
+
+        # Read jd, the julian date of the observation
+        jd = fastavro._read.read_double(buf)
+        timestamp = Time(jd, format="jd")
+
+        # Skip many fields:
+        fastavro._read.skip_int(buf)  # fid
+        fastavro._read.skip_long(buf)  # pid
+        fastavro._read.skip_union(buf, _optional_float_fastavro, {})  # diffmaglim
+        fastavro._read.skip_union(buf, _optional_string_fastavro, {})  # pdiffimfilename
+        fastavro._read.skip_union(buf, _optional_string_fastavro, {})  # programpi
+        fastavro._read.skip_int(buf)  # programid
+        fastavro._read.skip_long(buf)  # candid
+        fastavro._read.skip_utf8(buf)  # isdiffpos
+        fastavro._read.skip_union(buf, _optional_long_fastavro, {})  # tblid
+        fastavro._read.skip_union(buf, _optional_int_fastavro, {})  # nid
+        fastavro._read.skip_union(buf, _optional_int_fastavro, {})  # rcid
+        fastavro._read.skip_union(buf, _optional_int_fastavro, {})  # field
+        fastavro._read.skip_union(buf, _optional_float_fastavro, {})  # xpos
+        fastavro._read.skip_union(buf, _optional_float_fastavro, {})  # ypos
+
+        ra = fastavro._read.read_double(buf)
+        dec = fastavro._read.read_double(buf)
+        pos = SkyCoord(ra=ra, dec=dec, unit="deg")
+
+        return AlertRecord(
+            object_id=object_id,
+            candidate_id=candidate_id,
+            position=pos,
+            timestamp=timestamp,
+            raw_data=raw_data,
+            raw_dict=None,
+        )
 
     @classmethod
     def from_file_fastavro_subschema(cls, fp: IO[bytes]) -> AlertRecord:

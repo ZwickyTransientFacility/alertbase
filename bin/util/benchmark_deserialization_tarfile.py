@@ -5,15 +5,15 @@ import numpy as np
 
 
 def main():
+    do_benchmark("read_safe")
     do_benchmark("read_manual_decoder")
     do_benchmark("read_subschema")
-    do_benchmark("read_safe")
     do_benchmark("read_fastavro_safe")
+    do_benchmark("read_fastavro_manual_decoder")
     do_benchmark("read_fastavro_subschema")
 
 
 def do_benchmark(funcname):
-    print(f"benchmarking {funcname}")
     n = 1
     results = np.array(
         timeit.repeat(
@@ -29,7 +29,7 @@ def do_benchmark(funcname):
 
     results /= n_alerts
     results *= 1000 # up to ms
-    print(f"min: {results.min():.3f}ms  mean: {results.mean():.3f}ms  std: {results.std():.3f}ms  rate: {mb_per_sec:.2f} MB/sec")
+    print(f"{results.min():.3f} | {mb_per_sec:.2f} |")
 
 
 
@@ -55,6 +55,10 @@ def read_fastavro_safe():
 
 def read_fastavro_subschema():
     iterator = iterate_tarfile(filepath, AlertRecord.from_file_fastavro_subschema)
+    return sum(1 for _ in iterator)
+
+def read_fastavro_manual_decoder():
+    iterator = iterate_tarfile(filepath, AlertRecord.from_file_fastavro_unsafe)
     return sum(1 for _ in iterator)
 
 if __name__ == "__main__":
