@@ -4,6 +4,7 @@ import numpy as np
 
 
 def main():
+    do_benchmark("precompile")
     do_benchmark("safe")
     do_benchmark("manual_decoder")
     do_benchmark("subschema")
@@ -53,6 +54,11 @@ def fastavro_subschema():
 def fastavro_manual_decoder():
     with open(filepath, 'rb') as f:
         AlertRecord.from_file_fastavro_unsafe(f)
+
+def precompile():
+    with open(filepath, 'rb') as f:
+        AlertRecord.from_file_precompile(f)
+
 
 if __name__ == "__main__":
     main()

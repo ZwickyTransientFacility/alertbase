@@ -232,3 +232,23 @@ class AlertRecord:
         alert = cls.from_dict(alert_dict)
         alert.raw_data = raw_data
         return alert
+
+    @classmethod
+    def from_file_precompile(cls, fp: IO[bytes]) -> AlertRecord:
+        # Save a copy of the raw bytes
+        raw_data = fp.read()
+        buf = io.BytesIO(raw_data)
+
+        # Skip the file header
+        fastavro._read.skip_record(buf, _fastavro_META_SCHEMA, {})
+
+        # Num objects in the block
+        block_count = fastavro._read.read_long(buf)
+        assert block_count == 1
+        # Size in bytes of the serialized objects in the block
+        _ = fastavro._read.skip_long(buf)
+
+        alert_dict = alert_schemas.precompiled_writer_parser(buf)
+        alert = cls.from_dict(alert_dict)
+        alert.raw_data = raw_data
+        return alert
