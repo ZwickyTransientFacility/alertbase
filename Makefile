@@ -1,5 +1,6 @@
 virtualenv:
 	python -m venv virtualenv
+	virtualenv/bin/pip install "pip>=20.3" --upgrade
 
 VENV = virtualenv/bin
 $(VENV): virtualenv
