@@ -18,13 +18,38 @@ class Database:
     blobstore: Blobstore
     index: IndexDB
 
-    def __init__(self, s3_region: str, bucket: str, indexdb_path: str, create_if_missing: bool = False):
+    def __init__(
+        self,
+        s3_region: str,
+        bucket: str,
+        indexdb_path: str,
+        create_if_missing: bool = False,
+    ):
         self.blobstore = Blobstore(s3_region, bucket)
         self.index = IndexDB(indexdb_path, create_if_missing)
 
     async def upload_tarfile(
-            self, tarfile_path: pathlib.Path, n_worker: int = 8, limit: Optional[int] = None,
+        self,
+        tarfile_path: pathlib.Path,
+        n_worker: int = 8,
+        limit: Optional[int] = None,
+            skip_existing: bool = False,
     ) -> None:
+        """Upload a ZTF-style tarfile of alert data using a pool of workers to
+        concurrently upload alerts.
+
+        tarfile_path: a local path on disk to a gzipped tarfile containing
+        individual avro-serialized alert files.
+
+        n_worker: the number of concurrent S3 sessions to open for uploading.
+
+        limit: maximum numbr of alerts to upload.
+
+        skip_existing: if true, don't upload alerts which are already present in
+        the local index
+
+        """
+
         upload_queue: asyncio.Queue[AlertRecord] = asyncio.Queue()
         tarfile_read_done = asyncio.Event()
 
@@ -32,55 +57,54 @@ class Database:
             n = 0
             for alert in iterate_tarfile(tarfile_path):
                 logger.info("scanned alert %s", alert.candidate_id)
-                await upload_queue.put(alert)
+                if skip_existing:
+                    if self.index.get_url(alert.candidate_id) is not None:
+                        logger.info("alert is already stored, skipping it")
+                        continue
                 n += 1
-                if limit is not None and n >= limit:
+                if limit is not None and n > limit:
+                    logger.info("tarfile limit reached")
                     break
+                await upload_queue.put(alert)
             tarfile_read_done.set()
             logger.info("done processing tarfile")
 
-        async def process_queue(bs) -> None:
-            logger.info("process queue online")
-            while True:
-                alert = await upload_queue.get()
-                start = time.monotonic()
-                logger.debug("uploading alert id=%s", alert.candidate_id)
-                url = await bs.upload_alert_async(alert)
-                self.index.insert(url, alert)
-                logger.info("uploaded alert id=%s\ttiming=%.3fs",
-                             alert.candidate_id, time.monotonic() - start)
-                upload_queue.task_done()
-            logger.info("uploader task done")
+        async def process_queue() -> None:
+            logger.debug("process queue online")
+            async with await self.blobstore.session() as session:
+                while True:
+                    if tarfile_read_done.is_set() and upload_queue.empty():
+                        # All input is done, so exit
+                        break
+                    # More to go
+                    alert = await upload_queue.get()
+                    start = time.monotonic()
+                    logger.debug("uploading alert id=%s", alert.candidate_id)
+                    url = await session.upload(alert)
+                    self.index.insert(url, alert)
+                    logger.info(
+                        "uploaded alert id=%s\ttiming=%.3fs",
+                        alert.candidate_id,
+                        time.monotonic() - start,
+                    )
+                    upload_queue.task_done()
+            logger.debug("uploader task done")
+
+        uploaders = []
 
         asyncio.create_task(tarfile_to_queue())
-        async with self.blobstore:
-            tasks = []
-            for i in range(n_worker):
-                logger.info("spinning up uploader task id=%d", i)
-                task = asyncio.create_task(process_queue(self.blobstore))
-                tasks.append(task)
+        for i in range(n_worker):
+            logger.info("spinning up uploader task id=%d", i)
+            task = asyncio.create_task(
+                process_queue(),
+            )
+            uploaders.append(task)
 
-            async def shutdown_workers() -> None:
-                # Wait for the scan of the file to complete
-                await tarfile_read_done.wait()
-                # Wait for everything in the queue to get handled, _or_ for a task to die on its own.
-                try:
-                    logger.info("waiting...")
-                    wait_tasks = (
-                        upload_queue.join(),
-                        asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION),
-                    )
-
-                    done, pending = await asyncio.wait(wait_tasks, return_when=asyncio.FIRST_COMPLETED)
-                    await asyncio.gather(*list(done))
-
-                except Exception as e:
-                    raise e
-                finally:
-                    for t in tasks:
-                        t.cancel()
-
-            await shutdown_workers()
+        try:
+            result = await asyncio.gather(*uploaders)
+        finally:
+            for u in uploaders:
+                u.cancel()
 
     async def stream_alerts(
         self, candidate_ids: Iterator[int], n_worker: int = 8

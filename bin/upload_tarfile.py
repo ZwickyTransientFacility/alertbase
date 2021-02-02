@@ -9,12 +9,20 @@ async def main():
     args = parse_args()
     if args.verbose:
         logging.basicConfig(level=logging.INFO)
-        logging.getLogger("botocore.retries.standard").setLevel(logging.DEBUG)
-        logging.getLogger("botocore.retryhandler").setLevel(logging.DEBUG)
-        logging.getLogger("boto3").setLevel(logging.DEBUG)
-        logging.getLogger("aiobotocore").setLevel(logging.DEBUG)
+        logging.getLogger("aiobotocore").setLevel(logging.INFO)
     db = initialize_db(args)
-    await db.upload_tarfile(args.tarfile, limit=args.limit)
+
+    upload_tarfile_kwargs = {
+        "tarfile_path": args.tarfile,
+    }
+    if args.limit is not None:
+        upload_tarfile_kwargs["limit"] = args.limit
+    if args.upload_worker_count is not None:
+        upload_tarfile_kwargs["n_worker"] = args.upload_worker_count
+    if args.skip_existing is not None:
+        upload_tarfile_kwargs["skip_existing"] = args.skip_existing
+    logging.info(f"uploading tarfile: {upload_tarfile_kwargs}")
+    await db.upload_tarfile(**upload_tarfile_kwargs)
 
 
 def initialize_db(args: argparse.Namespace) -> Database:
@@ -51,8 +59,12 @@ def parse_args() -> argparse.Namespace:
         help="S3 bucket to store alerts in"
     )
     argparser.add_argument(
-        "--skip-existing", type=bool, default=True,
-        help="skip any alerts which are already in the database (based on candidate ID)",
+        "--skip-existing", dest="skip_existing", action="store_true",
+        help="skip any alerts which are already in the database (based on candidate ID) (this is the default)",
+    )
+    argparser.add_argument(
+        "--no-skip-existing", dest="skip_existing", action="store_false",
+        help="do not skip any alerts which are already in the database (based on candidate ID)",
     )
     argparser.add_argument(
         "--create-db", type=bool, default=False,
@@ -78,4 +90,4 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
-    asyncio.run(main(), debug=True)
+    asyncio.run(main())

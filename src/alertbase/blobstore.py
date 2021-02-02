@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import boto3
-import aioboto3
 import io
 import asyncio
+import aiobotocore.session
 import aiobotocore.client
 import contextlib
 
@@ -46,67 +48,103 @@ from alertbase.alert import AlertRecord
 #
 # TODO: Write a full database unifying blobstore and indexdb.
 
-from botocore.config import Config
+from aiobotocore.config import AioConfig
 
-_retry_config = Config(
-   retries = {
-      'max_attempts': 10,
-      'mode': 'standard'
-   }
+_aio_boto_config = AioConfig(
+    connector_args=dict(
+        # These get passed in to the aiobotocore AioEndpointCreator, and from
+        # there they get passed in to the aiohttp TCPConnector constructore.
+        use_dns_cache=True,
+        keepalive_timeout=15,
+    ),
+    retries=dict(
+        max_attempts=10,
+        mode="standard"
+    ),
 )
+
 
 class Blobstore:
     region: str
     bucket: str
-    semaphore: asyncio.Semaphore
+    semaphore: asyncio.Semaphore  # Limits active number of BlobstoreSessions
 
     def __init__(self, s3_region: str, bucket: str, max_concurrency: int = 50):
+        """
+        Construct a new Blobstore.
+
+        max_concurrency sets the maximum number of concurrent sessions.
+        """
         self.region = s3_region
         self.bucket = bucket
         self.semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def session(self) -> BlobstoreSession:
+        return BlobstoreSession(
+            region=self.region,
+            bucket=self.bucket,
+            semaphore=self.semaphore,
+        )
+        session = aiobotocore.session.AioSession()
+        self._s3_client = await self._exit_stack.enter_async_context(
+            session.create_client("s3")
+        )
+
+
+class BlobstoreSession:
+    def __init__(self, region: str, bucket: str, semaphore: asyncio.Semaphore):
+        self._region = region
+        self._bucket = bucket
+        self._sem = semaphore
+        self._s3_client = None
         self._exit_stack = contextlib.AsyncExitStack()
 
     async def __aenter__(self):
+        await self._sem.acquire()
         session = aiobotocore.session.AioSession()
-        self._s3_client = await self._exit_stack.enter_async_context(session.create_client('s3'))
+        self._s3_client = await self._exit_stack.enter_async_context(
+            session.create_client(
+                "s3",
+                region_name=self._region,
+                config=_aio_boto_config,
+            )
+        )
+        return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+        self._s3_client = None
+        self._sem.release()
 
     def url_for(self, alert: AlertRecord) -> str:
-        return f"s3://{self.bucket}/{self._key_for(alert)}"
+        return f"s3://{self._bucket}/{self._key_for(alert)}"
 
     def _key_for(self, alert: AlertRecord) -> str:
         return f"alerts/v2/{alert.object_id}/{alert.candidate_id}"
 
-    async def _upload_async(self, alert_bytes: bytes, key: str) -> None:
+    async def upload(self, alert: AlertRecord) -> str:
+        url = self.url_for(alert)
+        key = self._key_for(alert)
+        logging.debug("doing an async upload to %s", url)
+        if alert.raw_data is None:
+            raise ValueError("alert has no raw data associated with it")
         await self._s3_client.put_object(
-            Bucket=self.bucket,
+            Bucket=self._bucket,
             Key=key,
-            Body=alert_bytes,
+            Body=alert.raw_data,
         )
+        return url
 
-    async def upload_alert_async(self, alert: AlertRecord) -> str:
-        async with self.semaphore:
-            url = self.url_for(alert)
-            key = self._key_for(alert)
-            logging.debug("doing an async upload to %s", url)
-            if alert.raw_data is None:
-                raise ValueError("alert has no raw data associated with it")
-            await self._upload_async(alert.raw_data, key)
-            return url
+    async def download(self, url: str) -> AlertRecord:
+        if not url.startswith("s3://"):
+            raise ValueError("invalid scheme, url should start with 's3://'")
+        url = url[5:]
+        bucket, key = url.split("/", 1)
+        resp = await self._s3_client.get_object(
+            Bucket=_bucket,
+            Key=key,
+        )
+        body = await resp["Body"].read()
 
-    async def download_alert_async(self, url: str) -> AlertRecord:
-        async with self.semaphore:
-            if not url.startswith("s3://"):
-                raise ValueError("invalid scheme, url should start with 's3://'")
-            url = url[5:]
-            bucket, key = url.split("/", 1)
-            resp = await self._s3_client.get_object(
-                Bucket=bucket,
-                Key=key,
-            )
-            body = await resp["Body"].read()
-
-            f = functools.partial(AlertRecord.from_file_unsafe, io.BytesIO(body))
-            return await asyncio.get_running_loop().run_in_executor(None, f)
+        f = functools.partial(AlertRecord.from_file_unsafe, io.BytesIO(body))
+        return await asyncio.get_running_loop().run_in_executor(None, f)
