@@ -1,1 +1,5 @@
 virtualenv
+pip-wheel-metadata
+*.egg-info
+__pycache__
+alerts.db

@@ -2,6 +2,13 @@ import boto3
 import aioboto3
 import io
 import asyncio
+import aiobotocore.client
+import contextlib
+
+import logging
+import functools
+
+logger = logging.getLogger(__name__)
 
 from alertbase.alert import AlertRecord
 
@@ -39,14 +46,32 @@ from alertbase.alert import AlertRecord
 #
 # TODO: Write a full database unifying blobstore and indexdb.
 
+from botocore.config import Config
+
+_retry_config = Config(
+   retries = {
+      'max_attempts': 10,
+      'mode': 'standard'
+   }
+)
 
 class Blobstore:
+    region: str
     bucket: str
     semaphore: asyncio.Semaphore
 
-    def __init__(self, bucket: str, max_concurrency: int = 50):
+    def __init__(self, s3_region: str, bucket: str, max_concurrency: int = 50):
+        self.region = s3_region
         self.bucket = bucket
         self.semaphore = asyncio.Semaphore(max_concurrency)
+        self._exit_stack = contextlib.AsyncExitStack()
+
+    async def __aenter__(self):
+        session = aiobotocore.session.AioSession()
+        self._s3_client = await self._exit_stack.enter_async_context(session.create_client('s3'))
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
 
     def url_for(self, alert: AlertRecord) -> str:
         return f"s3://{self.bucket}/{self._key_for(alert)}"
@@ -54,49 +79,22 @@ class Blobstore:
     def _key_for(self, alert: AlertRecord) -> str:
         return f"alerts/v2/{alert.object_id}/{alert.candidate_id}"
 
-    def _upload(self, alert_bytes: bytes, key: str) -> None:
-        boto3.client("s3").put_object(
+    async def _upload_async(self, alert_bytes: bytes, key: str) -> None:
+        await self._s3_client.put_object(
             Bucket=self.bucket,
             Key=key,
             Body=alert_bytes,
         )
 
-    async def _upload_async(self, alert_bytes: bytes, key: str) -> None:
-        async with aioboto3.client("s3") as s3:
-            await s3.put_object(
-                Bucket=self.bucket,
-                Key=key,
-                Body=alert_bytes,
-            )
-
     async def upload_alert_async(self, alert: AlertRecord) -> str:
         async with self.semaphore:
             url = self.url_for(alert)
             key = self._key_for(alert)
-            print(f"doing an async upload to {url}")
+            logging.debug("doing an async upload to %s", url)
             if alert.raw_data is None:
                 raise ValueError("alert has no raw data associated with it")
             await self._upload_async(alert.raw_data, key)
             return url
-
-    def upload_alert(self, alert: AlertRecord) -> str:
-        url = self.url_for(alert)
-        key = self._key_for(alert)
-        if alert.raw_data is None:
-            raise ValueError("alert has no raw data associated with it")
-        self._upload(alert.raw_data, key)
-        return url
-
-    def download_alert(self, url: str) -> AlertRecord:
-        if not url.startswith("s3://"):
-            raise ValueError("invalid scheme, url should start with 's3://'")
-        url = url[5:]
-        bucket, key = url.split("/", 1)
-        resp = boto3.client("s3").get_object(
-            Bucket=bucket,
-            Key=key,
-        )
-        return AlertRecord.from_file_safe(resp["Body"])
 
     async def download_alert_async(self, url: str) -> AlertRecord:
         async with self.semaphore:
@@ -104,13 +102,11 @@ class Blobstore:
                 raise ValueError("invalid scheme, url should start with 's3://'")
             url = url[5:]
             bucket, key = url.split("/", 1)
-            async with aioboto3.client("s3") as s3:
-                resp = await s3.get_object(
-                    Bucket=bucket,
-                    Key=key,
-                )
-                body = await resp["Body"].read()
-                import functools
+            resp = await self._s3_client.get_object(
+                Bucket=bucket,
+                Key=key,
+            )
+            body = await resp["Body"].read()
 
-                f = functools.partial(AlertRecord.from_file_unsafe, io.BytesIO(body))
-                return await asyncio.get_running_loop().run_in_executor(None, f)
+            f = functools.partial(AlertRecord.from_file_unsafe, io.BytesIO(body))
+            return await asyncio.get_running_loop().run_in_executor(None, f)
