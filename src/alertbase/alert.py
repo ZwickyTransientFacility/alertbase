@@ -7,8 +7,9 @@ from avro.datafile import META_SCHEMA, DataFileReader
 from avro import schema
 
 from dataclasses import dataclass
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, CartesianRepresentation
 from astropy.time import Time
+import healpy
 
 _optional_float = schema.parse('["null", "float"]')
 _optional_string = schema.parse('["null", "string"]')
@@ -122,4 +123,14 @@ class AlertRecord:
             timestamp=timestamp,
             raw_data=raw_data,
             raw_dict=None,
+        )
+
+    def healpixel(self, map_order: int) -> int:
+        pos = self.position.replicate(representation_type=CartesianRepresentation)
+        return healpy.vec2pix(
+            nside=healpy.order2nside(map_order),
+            x=pos.x.value,
+            y=pos.y.value,
+            z=pos.z.value,
+            nest=True,
         )

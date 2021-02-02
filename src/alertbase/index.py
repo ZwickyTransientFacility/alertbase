@@ -7,6 +7,8 @@ from astropy.coordinates import SkyCoord, Angle, CartesianRepresentation
 from astropy.time import Time
 import healpy
 
+from alertbase.alert import AlertRecord
+
 from .encoding import (
     pack_uint64,
     pack_varint,
@@ -73,6 +75,15 @@ class IndexDB:
         self._append(self.objects, pack_str(object_id), id_bytes)
         self._append(self.healpixels, pack_uint64(healpixel), id_bytes)
         self._append(self.timestamps, pack_time(time), id_bytes)
+
+    def insert(self, url: str, alert: AlertRecord) -> None:
+        self._write(
+            alert_url=url,
+            candidate_id=alert.candidate_id,
+            object_id=alert.object_id,
+            time=alert.timestamp,
+            healpixel=alert.healpixel(self.order),
+        )
 
     def get_url(self, candidate_id: int) -> Optional[str]:
         """
