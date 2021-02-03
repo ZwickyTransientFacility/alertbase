@@ -38,9 +38,10 @@ logger = logging.getLogger(__name__)
 #   check whether the current schema is already uploaded (cached check, that),
 #   and proceed.
 #
+#
 # TODO: Write tests for blobstore.
 #
-
+# TODO: Keep a pool of active sessions
 _aio_boto_config = AioConfig(
     connector_args=dict(
         # These get passed in to the aiobotocore AioEndpointCreator, and from
