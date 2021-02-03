@@ -9,6 +9,7 @@ from alertbase.alert import AlertRecord
 from alertbase.alert_tar import iterate_tarfile
 from alertbase.blobstore import Blobstore
 from alertbase.index import IndexDB
+from alertbase.dbmeta import DBMeta
 
 import asyncio
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 class Database:
     blobstore: Blobstore
     index: IndexDB
+    meta: DBMeta
 
     def __init__(
         self,
@@ -28,6 +30,7 @@ class Database:
     ):
         self.blobstore = Blobstore(s3_region, bucket)
         self.index = IndexDB(indexdb_path, create_if_missing)
+        self.meta = DBMeta(bucket, s3_region, self.index)
 
     async def cone_search(
         self, center: SkyCoord, radius: Angle

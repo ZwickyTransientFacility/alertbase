@@ -48,6 +48,22 @@ class TestIndexDB:
         with pytest.raises(Exception):
             alertbase.IndexDB("bogus")
 
-    def test_write(self, tmpdir):
+    def test_write_roundtrip(self, tmpdir):
         db = alertbase.IndexDB(tmpdir, create_if_missing=True)
-        db._write("url", 1, "obj", astropy.time.Time("2020-01-01T00:00:00"), 1)
+        alert_url = "url"
+        candidate_id = 1
+        object_id = "obj"
+        timestamp = astropy.time.Time("2020-01-01T00:00:00")
+        healpixel = 1
+        db._write(alert_url, candidate_id, object_id, timestamp, healpixel)
+
+        have_url = db.get_url(candidate_id)
+        assert have_url == alert_url
+
+        candidates = list(db.object_search(object_id))
+        assert len(candidates) == 1
+        assert candidates[0] == candidate_id
+
+        candidates = list(db.timerange_search(start=timestamp, end=timestamp + 1))
+        assert len(candidates) == 1
+        assert candidates[0] == candidate_id

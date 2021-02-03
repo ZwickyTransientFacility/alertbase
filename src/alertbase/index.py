@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Generic, TypeVar, Tuple
 
 import pathlib
 import plyvel
@@ -10,13 +10,13 @@ import numpy as np
 
 from alertbase.alert import AlertRecord
 
-from .encoding import (
-    pack_uint64,
-    pack_varint,
-    pack_str,
-    pack_time,
-    unpack_str,
-    iter_varints,
+from alertbase.encoding import (
+    Codec,
+    uint64_codec,
+    time_codec,
+    str_codec,
+    varint_codec,
+    varint_iterator_codec,
 )
 import logging
 
@@ -25,10 +25,10 @@ logger = logging.getLogger(__name__)
 
 class IndexDB:
     db_root: pathlib.Path
-    objects: plyvel.DB
-    candidates: plyvel.DB
-    healpixels: plyvel.DB
-    timestamps: plyvel.DB
+    candidates: _TypedLevelDB[int, str]
+    objects: _TypedLevelDB[str, Iterator[int]]
+    healpixels: _TypedLevelDB[int, Iterator[int]]
+    timestamps: _TypedLevelDB[Time, Iterator[int]]
 
     order: int
 
@@ -38,21 +38,37 @@ class IndexDB:
         if create_if_missing:
             self.db_root.mkdir(parents=True, exist_ok=True)
 
-        self.objects = plyvel.DB(
-            str(self.db_root / "objects"),
-            create_if_missing=create_if_missing,
+        self.objects = _TypedLevelDB(
+            db=plyvel.DB(
+                str(self.db_root / "objects"),
+                create_if_missing=create_if_missing,
+            ),
+            key_codec=str_codec,
+            val_codec=varint_iterator_codec,
         )
-        self.candidates = plyvel.DB(
-            str(self.db_root / "candidates"),
-            create_if_missing=create_if_missing,
+        self.candidates = _TypedLevelDB(
+            db=plyvel.DB(
+                str(self.db_root / "candidates"),
+                create_if_missing=create_if_missing,
+            ),
+            key_codec=varint_codec,
+            val_codec=str_codec,
         )
-        self.healpixels = plyvel.DB(
-            str(self.db_root / "healpixels"),
-            create_if_missing=create_if_missing,
+        self.healpixels = _TypedLevelDB(
+            db=plyvel.DB(
+                str(self.db_root / "healpixels"),
+                create_if_missing=create_if_missing,
+            ),
+            key_codec=uint64_codec,
+            val_codec=varint_iterator_codec,
         )
-        self.timestamps = plyvel.DB(
-            str(self.db_root / "timestamps"),
-            create_if_missing=create_if_missing,
+        self.timestamps = _TypedLevelDB(
+            db=plyvel.DB(
+                str(self.db_root / "timestamps"),
+                create_if_missing=create_if_missing,
+            ),
+            key_codec=time_codec,
+            val_codec=varint_iterator_codec,
         )
 
         self.order = 12
@@ -73,11 +89,10 @@ class IndexDB:
         """
         Add a record to all levelDB databases.
         """
-        id_bytes = pack_varint(candidate_id)
-        self.candidates.put(id_bytes, pack_str(alert_url))
-        self._append(self.objects, pack_str(object_id), id_bytes)
-        self._append(self.healpixels, pack_uint64(healpixel), id_bytes)
-        self._append(self.timestamps, pack_time(time), id_bytes)
+        self.candidates.put(candidate_id, alert_url)
+        self.objects.append(object_id, iter([candidate_id]))
+        self.healpixels.append(healpixel, iter([candidate_id]))
+        self.timestamps.append(time, iter([candidate_id]))
 
     def insert(self, url: str, alert: AlertRecord) -> None:
         self._write(
@@ -93,32 +108,26 @@ class IndexDB:
         Get the URL where a full alert packet is stored for the given
         alert candidate ID.
         """
-        val = self.candidates.get(pack_varint(candidate_id))
-        if val is None:
-            return None
-        return unpack_str(val)
+        return self.candidates.get(candidate_id)
 
     def object_search(self, object_id: str) -> Iterator[int]:
         """
         Retrieve the candidate IDs for a given ZTF object
         """
-        raw = self.objects.get(pack_str(object_id))
-        if raw is None:
+        it = self.objects.get(object_id)
+        if it is None:
             raise StopIteration
-        return iter_varints(raw)
+        return it
 
     def timerange_search(self, start: Time, end: Time) -> Iterator[int]:
         """
         Retrieve the candidate IDs for all alerts that were recorded between
         start and end time range (values should be julian dates).
         """
-        iterator = self.timestamps.iterator(
-            start=pack_time(start),
-            stop=pack_time(end),
-        )
-        for _, val in iterator:
-            for id in iter_varints(val):
-                yield id
+        iterator = self.timestamps.iterate(start, end)
+        for timestamp in iterator:
+            for candidate_id in timestamp:
+                yield candidate_id
 
     def cone_search(self, center: SkyCoord, radius: Angle) -> Iterator[int]:
         """
@@ -139,14 +148,9 @@ class IndexDB:
         logger.info("compacted range into %d elements", len(ranges))
         for start, stop in ranges:
             logger.info("checking range %d to %d", start, stop)
-            start_bytes = pack_uint64(start)
-            stop_bytes = pack_uint64(stop)
-            for _, value in self.healpixels.iterator(
-                start=start_bytes, stop=stop_bytes
-            ):
-                candidates = iter_varints(value)
-                for c in candidates:
-                    yield c
+            for pixel in self.healpixels.iterate(start, stop):
+                for candidate_id in pixel:
+                    yield candidate_id
 
     @staticmethod
     def _compact_pixel_ranges(pixelseq: np.ndarray) -> np.ndarray:
@@ -173,25 +177,86 @@ class IndexDB:
         many there are.
 
         """
-        return sum(1 for _ in self.objects.iterator())
+        return self.objects.count()
 
     def count_candidates(self) -> int:
         """count_candidates iterates over all the candidates in the database to count
         how many there are.
 
         """
-        return sum(1 for _ in self.candidates.iterator())
+        return self.candidates.count()
 
     def count_healpixels(self) -> int:
         """count_candidates iterates over all the HEALPix pixels in the database to
         count how many have data.
 
         """
-        return sum(1 for _ in self.healpixels.iterator())
+        return self.healpixels.count()
 
     def count_timestamps(self) -> int:
         """count_timestamps iterates over all the HEALPix pixels in the database to
         count how many unique timestamps have data.
 
         """
-        return sum(1 for _ in self.timestamps.iterator())
+        return self.timestamps.count()
+
+
+K = TypeVar("K")
+V = TypeVar("V")
+
+
+class _TypedLevelDB(Generic[K, V]):
+    db: plyvel.DB
+    key_codec: Codec[K]
+    val_codec: Codec[V]
+
+    def __init__(self, db: plyvel.DB, key_codec: Codec[K], val_codec: Codec[V]):
+        self.db = db
+        self.key_codec = key_codec
+        self.val_codec = val_codec
+
+    def get(self, key: K) -> Optional[V]:
+        val = self.db.get(self.key_codec.pack(key))
+        if val is None:
+            return None
+        return self.val_codec.unpack(val)
+
+    def iterate(self, start: K, stop: K) -> Iterator[V]:
+        with self.db.iterator(
+            start=self.key_codec.pack(start),
+            stop=self.key_codec.pack(stop),
+            include_key=False,
+        ) as it:
+            for v in it:
+                yield self.val_codec.unpack(v)
+
+    def put(self, key: K, val: V) -> None:
+        self.db.put(self.key_codec.pack(key), self.val_codec.pack(val))
+
+    def append(self, key: K, val: V) -> None:
+        encoded_key = self.key_codec.pack(key)
+        prev = self.db.get(encoded_key, default=b"", fill_cache=False)
+        self.db.put(encoded_key, prev + self.val_codec.pack(val))
+
+    def count(self) -> int:
+        with self.db.iterator(include_value=False) as it:
+            return sum(1 for _ in it)
+
+    def key_range_stats(self) -> Tuple[int, K, K]:
+        """ Return the count, min, and max of the key space. """
+        n = 0
+        min_val = None
+        max_val = None
+        with self.db.iterator(include_value=False) as it:
+            for key_raw in it:
+                n += 1
+                key = self.key_codec.unpack(key_raw)
+                if min_val is None or key < min_val:
+                    min_val = key
+                if max_val is None or key > max_val:
+                    max_val = key
+
+        if min_val is None or max_val is None:
+            raise ValueError("no values in the database")
+
+        return n, min_val, max_val
