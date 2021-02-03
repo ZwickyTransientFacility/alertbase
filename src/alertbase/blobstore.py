@@ -58,6 +58,9 @@ class Blobstore:
     bucket: str
     semaphore: asyncio.Semaphore  # Limits active number of BlobstoreSessions
 
+    # S3 endpoint; overwritten in tests
+    _endpoint: Optional[str]
+
     def __init__(self, s3_region: str, bucket: str, max_concurrency: int = 50):
         """
         Construct a new Blobstore.
@@ -67,24 +70,29 @@ class Blobstore:
         self.region = s3_region
         self.bucket = bucket
         self.semaphore = asyncio.Semaphore(max_concurrency)
+        self._endpoint = None
 
     async def session(self) -> BlobstoreSession:
         return BlobstoreSession(
             region=self.region,
             bucket=self.bucket,
             semaphore=self.semaphore,
-        )
-        session = aiobotocore.session.AioSession()
-        self._s3_client = await self._exit_stack.enter_async_context(
-            session.create_client("s3")
+            endpoint=self._endpoint,
         )
 
 
 class BlobstoreSession:
-    def __init__(self, region: str, bucket: str, semaphore: asyncio.Semaphore):
+    def __init__(
+        self,
+        region: str,
+        bucket: str,
+        semaphore: asyncio.Semaphore,
+        endpoint: Optional[str] = None,
+    ):
         self._region = region
         self._bucket = bucket
         self._sem = semaphore
+        self._endpoint = endpoint
         self._s3_client: Optional[aiobotocore.client.AioBaseClient] = None
         self._exit_stack = contextlib.AsyncExitStack()
 
@@ -96,6 +104,7 @@ class BlobstoreSession:
                 "s3",
                 region_name=self._region,
                 config=_aio_boto_config,
+                endpoint_url=self._endpoint,
             )
         )
         return self
