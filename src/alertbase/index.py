@@ -6,6 +6,7 @@ import plyvel
 from astropy.coordinates import SkyCoord, Angle, CartesianRepresentation
 from astropy.time import Time
 import healpy
+import numpy as np
 
 from alertbase.alert import AlertRecord
 
@@ -14,10 +15,12 @@ from .encoding import (
     pack_varint,
     pack_str,
     pack_time,
-    unpack_uint64s,
     unpack_str,
     iter_varints,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class IndexDB:
@@ -131,12 +134,39 @@ class IndexDB:
             inclusive=True,
             nest=True,
         )
-        for p in pixels:
-            value = self.healpixels.get(pack_uint64(p))
-            if value is not None:
-                candidates = unpack_uint64s(value)
+        logger.info("found %d pixels which might match", len(pixels))
+        ranges = self._compact_pixel_ranges(pixels)
+        logger.info("compacted range into %d elements", len(ranges))
+        for start, stop in ranges:
+            logger.info("checking range %d to %d", start, stop)
+            start_bytes = pack_uint64(start)
+            stop_bytes = pack_uint64(stop)
+            for _, value in self.healpixels.iterator(
+                start=start_bytes, stop=stop_bytes
+            ):
+                candidates = iter_varints(value)
                 for c in candidates:
                     yield c
+
+    @staticmethod
+    def _compact_pixel_ranges(pixelseq: np.ndarray) -> np.ndarray:
+        """healpy gives us an enormous sequence of pixels. Compact it into (start, stop)
+        pairs describing contiguous runs.
+        """
+        # Compute differences of sequential elements
+        deltas = pixelseq[1:] - pixelseq[:-1]
+        # Find elements which are more than 1 away from the previous elemeent
+        starts = pixelseq[1:][deltas != 1]
+        # Include first element
+        starts = np.concatenate((pixelseq[:1], starts))
+        # Find elements which are more than 1 away from the next element
+        ends = pixelseq[:-1][deltas != 1]
+        # Include last element
+        ends = np.concatenate((ends, pixelseq[-1:]))
+        # Offset ends by 1 for exclusive ranges
+        ends += 1
+        result: np.ndarray = np.dstack((starts, ends))[0]
+        return result
 
     def count_objects(self) -> int:
         """count_objects iterates over all the objects in the database to count how

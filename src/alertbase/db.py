@@ -35,6 +35,7 @@ class Database:
         candidates = self.index.cone_search(center, radius)
 
         async for alert in self.stream_alerts(candidates):
+            logger.info("yielding %s", alert.candidate_id)
             yield alert
 
     def cone_search_synchronous(
@@ -127,7 +128,8 @@ class Database:
                 u.cancel()
 
     async def stream_alerts(
-        self, candidate_ids: Iterator[int], n_worker: int = 8
+        self,
+        candidate_ids: Iterator[int],
     ) -> AsyncGenerator[AlertRecord, None]:
         url_queue: asyncio.Queue[str] = asyncio.Queue()
         result_queue: asyncio.Queue[AlertRecord] = asyncio.Queue()
@@ -139,6 +141,19 @@ class Database:
             if url is None:
                 raise ValueError(f"no known URL for candidate: {id}")
             await url_queue.put(url)
+
+        if n < 10:
+            n_worker = 1
+        elif n < 20:
+            n_worker = 2
+        elif n < 40:
+            n_worker = 3
+        elif n < 60:
+            n_worker = 4
+        elif n < 80:
+            n_worker = 5
+        else:
+            n_worker = 8
 
         async def process_queue() -> None:
             async with await self.blobstore.session() as session:
