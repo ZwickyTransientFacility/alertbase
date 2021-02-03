@@ -38,17 +38,8 @@ logger = logging.getLogger(__name__)
 #   check whether the current schema is already uploaded (cached check, that),
 #   and proceed.
 #
-#
-# TODO: Parallelize uploads and downloads.
-#
-#   This seems like it should be doable just with asyncio concurrency
-#   primitives.
-#
-#
 # TODO: Write tests for blobstore.
 #
-#
-# TODO: Write a full database unifying blobstore and indexdb.
 
 _aio_boto_config = AioConfig(
     connector_args=dict(

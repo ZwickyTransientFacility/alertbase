@@ -1,8 +1,9 @@
-from typing import AsyncGenerator, Iterator, Optional
+from typing import AsyncGenerator, Iterator, Optional, List
 
 import pathlib
 import logging
 import time
+from astropy.coordinates import SkyCoord, Angle
 
 from alertbase.alert import AlertRecord
 from alertbase.alert_tar import iterate_tarfile
@@ -27,6 +28,25 @@ class Database:
     ):
         self.blobstore = Blobstore(s3_region, bucket)
         self.index = IndexDB(indexdb_path, create_if_missing)
+
+    async def cone_search(
+        self, center: SkyCoord, radius: Angle
+    ) -> AsyncGenerator[AlertRecord, None]:
+        candidates = self.index.cone_search(center, radius)
+
+        async for alert in self.stream_alerts(candidates):
+            yield alert
+
+    def cone_search_synchronous(
+        self, center: SkyCoord, radius: Angle
+    ) -> List[AlertRecord]:
+        async def gather_alerts() -> List[AlertRecord]:
+            result = []
+            async for alert in self.cone_search(center, radius):
+                result.append(alert)
+            return result
+
+        return asyncio.run(gather_alerts())
 
     async def upload_tarfile(
         self,
