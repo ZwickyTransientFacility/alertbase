@@ -1,4 +1,4 @@
-from typing import AsyncGenerator, Iterator, Optional, List, Any
+from typing import AsyncGenerator, Iterator, Optional
 
 import pathlib
 import logging
@@ -33,7 +33,7 @@ class Database:
         tarfile_path: pathlib.Path,
         n_worker: int = 8,
         limit: Optional[int] = None,
-            skip_existing: bool = False,
+        skip_existing: bool = False,
     ) -> None:
         """Upload a ZTF-style tarfile of alert data using a pool of workers to
         concurrently upload alerts.
@@ -101,7 +101,7 @@ class Database:
             uploaders.append(task)
 
         try:
-            result = await asyncio.gather(*uploaders)
+            await asyncio.gather(*uploaders)
         finally:
             for u in uploaders:
                 u.cancel()
@@ -121,10 +121,11 @@ class Database:
             await url_queue.put(url)
 
         async def process_queue() -> None:
-            while True:
-                url = await url_queue.get()
-                alert = await self.blobstore.download_alert_async(url)
-                await result_queue.put(alert)
+            async with await self.blobstore.session() as session:
+                while True:
+                    url = await url_queue.get()
+                    alert = await session.download(url)
+                    await result_queue.put(alert)
 
         tasks = []
         for i in range(n_worker):

@@ -1,18 +1,20 @@
 from __future__ import annotations
+from typing import Optional
 
-import boto3
 import io
 import asyncio
 import aiobotocore.session
 import aiobotocore.client
+from aiobotocore.config import AioConfig
+
 import contextlib
 
 import logging
 import functools
 
-logger = logging.getLogger(__name__)
-
 from alertbase.alert import AlertRecord
+
+logger = logging.getLogger(__name__)
 
 # TODO: Single Object Encoding with cached schemas
 #
@@ -48,8 +50,6 @@ from alertbase.alert import AlertRecord
 #
 # TODO: Write a full database unifying blobstore and indexdb.
 
-from aiobotocore.config import AioConfig
-
 _aio_boto_config = AioConfig(
     connector_args=dict(
         # These get passed in to the aiobotocore AioEndpointCreator, and from
@@ -57,10 +57,7 @@ _aio_boto_config = AioConfig(
         use_dns_cache=True,
         keepalive_timeout=15,
     ),
-    retries=dict(
-        max_attempts=10,
-        mode="standard"
-    ),
+    retries=dict(max_attempts=10, mode="standard"),
 )
 
 
@@ -96,10 +93,10 @@ class BlobstoreSession:
         self._region = region
         self._bucket = bucket
         self._sem = semaphore
-        self._s3_client = None
+        self._s3_client: Optional[aiobotocore.client.AioBaseClient] = None
         self._exit_stack = contextlib.AsyncExitStack()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> BlobstoreSession:
         await self._sem.acquire()
         session = aiobotocore.session.AioSession()
         self._s3_client = await self._exit_stack.enter_async_context(
@@ -111,7 +108,7 @@ class BlobstoreSession:
         )
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):  # type: ignore
         await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
         self._s3_client = None
         self._sem.release()
@@ -128,6 +125,7 @@ class BlobstoreSession:
         logging.debug("doing an async upload to %s", url)
         if alert.raw_data is None:
             raise ValueError("alert has no raw data associated with it")
+        assert self._s3_client is not None
         await self._s3_client.put_object(
             Bucket=self._bucket,
             Key=key,
@@ -140,8 +138,9 @@ class BlobstoreSession:
             raise ValueError("invalid scheme, url should start with 's3://'")
         url = url[5:]
         bucket, key = url.split("/", 1)
+        assert self._s3_client is not None
         resp = await self._s3_client.get_object(
-            Bucket=_bucket,
+            Bucket=self._bucket,
             Key=key,
         )
         body = await resp["Body"].read()
