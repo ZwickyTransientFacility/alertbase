@@ -146,5 +146,5 @@ class BlobstoreSession:
         )
         body = await resp["Body"].read()
 
-        f = functools.partial(AlertRecord.from_file_unsafe, io.BytesIO(body))
+        f = functools.partial(AlertRecord.from_file_safe, io.BytesIO(body))
         return await asyncio.get_running_loop().run_in_executor(None, f)
