@@ -50,6 +50,9 @@ test: $(VENV)/pytest
 
 precommit: check-format typecheck lint test
 
+.PHONY: docs
+docs:
+	$(MAKE) -C docs html
 
 .PHONY: clean
 clean:
