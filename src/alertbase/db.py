@@ -6,6 +6,7 @@ from typing import AsyncGenerator, Iterator, Optional, List, Union, Type
 import pathlib
 import logging
 import time
+from astropy.time import Time
 from astropy.coordinates import SkyCoord, Angle
 
 from alertbase.alert import AlertRecord
@@ -105,25 +106,109 @@ class Database:
             time.monotonic() - start,
         )
 
-    async def cone_search(
+    def get_by_candidate_id(self, candidate_id: int) -> Optional[AlertRecord]:
+        url = self.index.get_url(candidate_id)
+        if url is None:
+            return None
+
+        async def fetch(url: str) -> AlertRecord:
+            async with await self.blobstore.session() as session:
+                return await session.download(url)
+
+        return asyncio.run(fetch(url))
+
+    def get_by_object_id(self, object_id: str) -> List[AlertRecord]:
+        candidates = self.index.object_search(object_id)
+        return self._download_alerts(candidates)
+
+    def get_by_time_range(self, start: Time, end: Time) -> List[AlertRecord]:
+        candidates = self.index.timerange_search(start, end)
+        return self._download_alerts(candidates)
+
+    def get_by_cone_search(self, center: SkyCoord, radius: Angle) -> List[AlertRecord]:
+        candidates = self.index.cone_search(center, radius)
+        return self._download_alerts(candidates)
+
+    async def get_by_object_id_async(
+        self, object_id: str
+    ) -> AsyncGenerator[AlertRecord, None]:
+        candidates = self.index.object_search(object_id)
+        return self._stream_alerts(candidates)
+
+    async def get_by_time_range_async(
+        self, start: Time, end: Time
+    ) -> AsyncGenerator[AlertRecord, None]:
+        candidates = self.index.timerange_search(start, end)
+        return self._stream_alerts(candidates)
+
+    async def get_by_cone_search_async(
         self, center: SkyCoord, radius: Angle
     ) -> AsyncGenerator[AlertRecord, None]:
         candidates = self.index.cone_search(center, radius)
+        return self._stream_alerts(candidates)
 
-        async for alert in self.stream_alerts(candidates):
-            logger.info("yielding %s", alert.candidate_id)
-            yield alert
+    def _download_alerts(self, candidates: Iterator[int]) -> List[AlertRecord]:
+        """Run an async loop to get all the candidates' associated alert data. Block
+        until it's complete, returning a complete list.
+        """
 
-    def cone_search_synchronous(
-        self, center: SkyCoord, radius: Angle
-    ) -> List[AlertRecord]:
-        async def gather_alerts() -> List[AlertRecord]:
+        async def fetch(candidates: Iterator[int]) -> List[AlertRecord]:
             result = []
-            async for alert in self.cone_search(center, radius):
+            async for alert in self._stream_alerts(candidates):
                 result.append(alert)
             return result
 
-        return asyncio.run(gather_alerts())
+        return asyncio.run(fetch(candidates))
+
+    async def _stream_alerts(
+        self,
+        candidate_ids: Iterator[int],
+    ) -> AsyncGenerator[AlertRecord, None]:
+        """Asynchronously fetch all the candidates' associated alert data. Returns an
+        asynchronous generator over the alerts.
+        """
+        url_queue: asyncio.Queue[str] = asyncio.Queue()
+        result_queue: asyncio.Queue[AlertRecord] = asyncio.Queue()
+
+        n = 0
+        for id in candidate_ids:
+            n += 1
+            url = self.index.get_url(id)
+            if url is None:
+                raise ValueError(f"no known URL for candidate: {id}")
+            await url_queue.put(url)
+
+        if n < 10:
+            n_worker = 1
+        elif n < 20:
+            n_worker = 2
+        elif n < 40:
+            n_worker = 3
+        elif n < 60:
+            n_worker = 4
+        elif n < 80:
+            n_worker = 5
+        else:
+            n_worker = 8
+
+        async def process_queue() -> None:
+            async with await self.blobstore.session() as session:
+                while True:
+                    url = await url_queue.get()
+                    alert = await session.download(url)
+                    await result_queue.put(alert)
+
+        tasks = []
+        for i in range(n_worker):
+            task = asyncio.create_task(process_queue())
+            tasks.append(task)
+
+        for i in range(n):
+            result = await result_queue.get()
+            yield result
+
+        for t in tasks:
+            t.cancel()
 
     async def upload_tarfile(
         self,
@@ -198,50 +283,3 @@ class Database:
         finally:
             for u in uploaders:
                 u.cancel()
-
-    async def stream_alerts(
-        self,
-        candidate_ids: Iterator[int],
-    ) -> AsyncGenerator[AlertRecord, None]:
-        url_queue: asyncio.Queue[str] = asyncio.Queue()
-        result_queue: asyncio.Queue[AlertRecord] = asyncio.Queue()
-
-        n = 0
-        for id in candidate_ids:
-            n += 1
-            url = self.index.get_url(id)
-            if url is None:
-                raise ValueError(f"no known URL for candidate: {id}")
-            await url_queue.put(url)
-
-        if n < 10:
-            n_worker = 1
-        elif n < 20:
-            n_worker = 2
-        elif n < 40:
-            n_worker = 3
-        elif n < 60:
-            n_worker = 4
-        elif n < 80:
-            n_worker = 5
-        else:
-            n_worker = 8
-
-        async def process_queue() -> None:
-            async with await self.blobstore.session() as session:
-                while True:
-                    url = await url_queue.get()
-                    alert = await session.download(url)
-                    await result_queue.put(alert)
-
-        tasks = []
-        for i in range(n_worker):
-            task = asyncio.create_task(process_queue())
-            tasks.append(task)
-
-        for i in range(n):
-            result = await result_queue.get()
-            yield result
-
-        for t in tasks:
-            t.cancel()
