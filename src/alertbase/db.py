@@ -1,4 +1,7 @@
-from typing import AsyncGenerator, Iterator, Optional, List
+from __future__ import annotations
+
+from types import TracebackType
+from typing import AsyncGenerator, Iterator, Optional, List, Union, Type
 
 import pathlib
 import logging
@@ -7,7 +10,7 @@ from astropy.coordinates import SkyCoord, Angle
 
 from alertbase.alert import AlertRecord
 from alertbase.alert_tar import iterate_tarfile
-from alertbase.blobstore import Blobstore
+from alertbase.blobstore import Blobstore, BlobstoreSession
 from alertbase.index import IndexDB
 from alertbase.dbmeta import DBMeta
 
@@ -20,17 +23,87 @@ class Database:
     blobstore: Blobstore
     index: IndexDB
     meta: DBMeta
+    db_path: pathlib.Path
+
+    any_writes: bool = False
 
     def __init__(
         self,
         s3_region: str,
         bucket: str,
-        indexdb_path: str,
+        db_path: Union[pathlib.Path, str],
         create_if_missing: bool = False,
     ):
+        """ Legacy constructor."""
+        self.db_path = pathlib.Path(db_path)
+        self.index = IndexDB(db_path, create_if_missing)
         self.blobstore = Blobstore(s3_region, bucket)
-        self.index = IndexDB(indexdb_path, create_if_missing)
-        self.meta = DBMeta(bucket, s3_region, self.index)
+
+        meta_path = Database._meta_path(db_path)
+        if meta_path.exists():
+            with open(meta_path, "r") as f:
+                self.meta = DBMeta.read_from_file(f)
+        else:
+            self.meta = DBMeta(bucket, s3_region)
+            self.meta.compute_keyranges(self.index)
+        with open(meta_path, "w") as f:
+            self.meta.write_to_file(f)
+
+    @classmethod
+    def create(
+        cls, region: str, bucket: str, db_path: Union[str, pathlib.Path]
+    ) -> Database:
+        return Database(region, bucket, db_path, True)
+
+    @classmethod
+    def open(cls, db_path: Union[str, pathlib.Path]) -> Database:
+        meta_path = Database._meta_path(db_path)
+        with open(meta_path, "r") as f:
+            meta = DBMeta.read_from_file(f)
+        return Database(
+            s3_region=meta.s3_region,
+            bucket=meta.s3_bucket,
+            db_path=db_path,
+            create_if_missing=False,
+        )
+
+    def __enter__(self) -> Database:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> Optional[bool]:
+        self.close()
+        return None
+
+    @staticmethod
+    def _meta_path(db_path: Union[str, pathlib.Path]) -> pathlib.Path:
+        return db_path / pathlib.Path("meta.json")
+
+    def close(self) -> None:
+        if self.any_writes:
+            logger.info("since writes took place, computing meta.json key ranges")
+            self.meta.compute_keyranges(self.index)
+        else:
+            logger.debug("skipping keyrange computation because no writes occurred")
+        with open(Database._meta_path(self.db_path), "w") as f:
+            self.meta.write_to_file(f)
+        self.index.close()
+
+    async def _write(self, alert: AlertRecord, session: BlobstoreSession) -> None:
+        self.any_writes = True
+        start = time.monotonic()
+        logger.debug("writing alert id=%s", alert.candidate_id)
+        url = await session.upload(alert)
+        self.index.insert(url, alert)
+        logger.info(
+            "wrote alert id=%s\ttiming=%.3fs",
+            alert.candidate_id,
+            time.monotonic() - start,
+        )
 
     async def cone_search(
         self, center: SkyCoord, radius: Angle
@@ -74,7 +147,9 @@ class Database:
 
         """
 
-        upload_queue: asyncio.Queue[AlertRecord] = asyncio.Queue()
+        # Putting a limit on the queue size ensures that we don't slurp
+        # _everything_ into memory at once.
+        upload_queue: asyncio.Queue[AlertRecord] = asyncio.Queue(100)
         tarfile_read_done = asyncio.Event()
 
         async def tarfile_to_queue() -> None:
@@ -90,6 +165,7 @@ class Database:
                     logger.info("tarfile limit reached")
                     break
                 await upload_queue.put(alert)
+                await asyncio.sleep(0)  # Yield to the scheduler.
             tarfile_read_done.set()
             logger.info("done processing tarfile")
 
@@ -102,16 +178,9 @@ class Database:
                         break
                     # More to go
                     alert = await upload_queue.get()
-                    start = time.monotonic()
-                    logger.debug("uploading alert id=%s", alert.candidate_id)
-                    url = await session.upload(alert)
-                    self.index.insert(url, alert)
-                    logger.info(
-                        "uploaded alert id=%s\ttiming=%.3fs",
-                        alert.candidate_id,
-                        time.monotonic() - start,
-                    )
+                    await self._write(alert, session)
                     upload_queue.task_done()
+                    await asyncio.sleep(0)  # Yield to the scheduler.
             logger.debug("uploader task done")
 
         uploaders = []

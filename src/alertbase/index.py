@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterator, Optional, Generic, TypeVar, Tuple
+from typing import Iterator, Optional, Generic, TypeVar, Tuple, Union
 
 import pathlib
 import plyvel
@@ -32,7 +32,9 @@ class IndexDB:
 
     order: int
 
-    def __init__(self, db_path: str, create_if_missing: bool = False):
+    def __init__(
+        self, db_path: Union[str, pathlib.Path], create_if_missing: bool = False
+    ):
         self.db_root = pathlib.Path(db_path)
 
         if create_if_missing:
@@ -200,6 +202,12 @@ class IndexDB:
         """
         return self.timestamps.count()
 
+    def close(self) -> None:
+        self.candidates.close()
+        self.objects.close()
+        self.healpixels.close()
+        self.timestamps.close()
+
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -214,6 +222,9 @@ class _TypedLevelDB(Generic[K, V]):
         self.db = db
         self.key_codec = key_codec
         self.val_codec = val_codec
+
+    def close(self) -> None:
+        self.db.close()
 
     def get(self, key: K) -> Optional[V]:
         val = self.db.get(self.key_codec.pack(key))
