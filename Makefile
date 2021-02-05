@@ -16,7 +16,7 @@ dev-setup: .git/hooks/pre-commit $(VENV)/flake8 $(VENV)/black $(VENV)/mypy
 deps: $(VENV)
 	$(VENV)/pip install -e '.[dev]'
 
-$(VENV)/flake8 $(VENV)/black $(VENV)/mypy $(VENV)/pytest &: $(VENV)/pip
+$(VENV)/flake8 $(VENV)/black $(VENV)/mypy $(VENV)/pytest $(VENV)/sphinx-build &: $(VENV)/pip
 	$(VENV)/pip install -e '.[dev]'
 
 .PHONY: lint check-format format typecheck precommit test
@@ -51,7 +51,7 @@ test: $(VENV)/pytest
 precommit: check-format typecheck lint test
 
 .PHONY: docs
-docs:
+docs: $(VENV)/sphinx-build
 	$(MAKE) -C docs html
 
 .PHONY: clean
