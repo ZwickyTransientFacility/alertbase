@@ -1,4 +1,5 @@
 import pytest
+import os
 import asyncio
 import astropy.time
 import astropy.coordinates
@@ -11,7 +12,15 @@ from alertbase.blobstore import Blobstore
 
 
 @pytest.fixture
-def s3_server():
+def aws_credentials():
+    os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
+    os.environ["AWS_ACCESS_KEY_ID"] = "testing"
+    if "AWS_PROFILE" in os.environ:
+        del os.environ["AWS_PROFILE"]
+
+
+@pytest.fixture
+def s3_server(aws_credentials):
     # Starts a mock S3 server in a separate thread. Yields the server, and then
     # turns it off after the test finishes.
     ip = "127.0.0.1"
