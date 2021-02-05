@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 
 class Database:
+    """
+    This is the main entrypoint for interacting with ``alertbase``. A Database
+    provides functions for adding new data, as well as for retrieving it.
+    """
+
     blobstore: Blobstore
     index: IndexDB
     meta: DBMeta
@@ -54,10 +59,36 @@ class Database:
     def create(
         cls, region: str, bucket: str, db_path: Union[str, pathlib.Path]
     ) -> Database:
+        """
+        Creates a new database on disk and returns the opened database.
+
+        :param region: The name of the S3 region that houses the bucket with
+                       data. For example, 'us-west-2'.
+
+        :param bucket: The name of the S3 bucket that stores data. The bucket
+                       must already exist.
+
+        :param db_path: A path on disk to a directory where the LevelDB index
+                        will be stored. This path should already exist; the
+                        database will be created within it.
+
+        :returns: The newly-created Database.
+        """
         return Database(region, bucket, db_path, True)
 
     @classmethod
     def open(cls, db_path: Union[str, pathlib.Path]) -> Database:
+        """
+        Opens a database from disk.
+
+        The database should already exist. To create a new database, use
+        :py:obj:`create`.
+
+        :param db_path: A path on disk to a directory where the database is
+                        stored.
+
+        :returns: The newly-opened Database.
+        """
         meta_path = Database._meta_path(db_path)
         with open(meta_path, "r") as f:
             meta = DBMeta.read_from_file(f)
@@ -69,6 +100,9 @@ class Database:
         )
 
     def __enter__(self) -> Database:
+        """
+        Returns the Database itself so that it can be used in context managers.
+        """
         return self
 
     def __exit__(
@@ -77,6 +111,9 @@ class Database:
         exc_value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> Optional[bool]:
+        """
+        Closes the Database when exiting from a context manager.
+        """
         self.close()
         return None
 
@@ -85,6 +122,14 @@ class Database:
         return db_path / pathlib.Path("meta.json")
 
     def close(self) -> None:
+        """
+        Close the Database. If any new alerts were written into the database since
+        it was opened, then the stored metadata will be updated by recomputing
+        summary statistics, which can take a little while.
+
+        After calling this, the Database's underlying storage handles will be
+        closed, so the Database will no longer work for queries.
+        """
         if self.any_writes:
             logger.info("since writes took place, computing meta.json key ranges")
             self.meta.compute_keyranges(self.index)
@@ -107,6 +152,14 @@ class Database:
         )
 
     def get_by_candidate_id(self, candidate_id: int) -> Optional[AlertRecord]:
+        """
+        Fetch a single :py:obj:`AlertRecord` given its candidate ID number.
+
+        If no alert is indexed with that ID, this returns None.
+
+        :param candidate_id: The ID of the alert candidate to retrieve.
+        :returns: The full alert payload.
+        """
         url = self.index.get_url(candidate_id)
         if url is None:
             return None
@@ -118,26 +171,88 @@ class Database:
         return asyncio.run(fetch(url))
 
     def get_by_object_id(self, object_id: str) -> List[AlertRecord]:
+        """
+        Fetch all alerts associated with a particular ZTF object ID. The returned
+        list may be empty if there are no alerts or if the object ID isn't
+        known.
+
+        :param object_id: The ZTF Object ID to search for.
+        :returns: A list of all alerts associated with the object.
+        """
         candidates = self.index.object_search(object_id)
         return self._download_alerts(candidates)
 
     def get_by_time_range(self, start: Time, end: Time) -> List[AlertRecord]:
+        """
+        Fetch all alerts from between the given start and end times. This list can
+        be very large!
+
+        More precisely, an alert's timestamp is defined as the ``jd`` field of
+        the Avro payload from ZTF.
+
+        :param start: Start of the time range to search over (inclusive).
+        :type start: astropy.time.Time
+
+        :param end: End of the time range to search over (exclusive).
+        :type end: astropy.time.Time
+
+        :returns: A list of all alerts between the two times.
+        """
         candidates = self.index.timerange_search(start, end)
         return self._download_alerts(candidates)
 
     def get_by_cone_search(self, center: SkyCoord, radius: Angle) -> List[AlertRecord]:
+        """
+        Fetch all alerts in a circular region of the sky.
+
+        :param center: The center of the circular region to search.
+        :type center: astropy.coordinates.SkyCoord
+
+        :param radius: The radius of the disc to search over.
+        :type radius: astropy.coordinates.Angle
+
+        :returns: A list of all alerts in the region.
+        """
         candidates = self.index.cone_search(center, radius)
         return self._download_alerts(candidates)
 
     async def get_by_object_id_async(
         self, object_id: str
     ) -> AsyncGenerator[AlertRecord, None]:
+        """
+        Asynchronously start retrieving all alerts associated with a particular
+        object.
+
+        This is the async equivalent of :py:obj:`get_by_object_id`.
+
+        :param object_id: The ZTF Object ID to search for.
+
+        :returns: An asynchronous stream of the alerts associated with the
+                  object.
+        """
         candidates = self.index.object_search(object_id)
         return self._stream_alerts(candidates)
 
     async def get_by_time_range_async(
         self, start: Time, end: Time
     ) -> AsyncGenerator[AlertRecord, None]:
+        """
+        Asynchronously start retrieving all alerts from between the given start and
+        end times.
+
+        More precisely, an alert's timestamp is defined as the ``jd`` field of
+        the Avro payload from ZTF.
+
+        This is the async equivalent of :py:obj:`get_by_time_range`.
+
+        :param start: Start of the time range to search over (inclusive).
+        :type start: astropy.time.Time
+
+        :param end: End of the time range to search over (exclusive).
+        :type end: astropy.time.Time
+
+        :returns: An asynchronous stream of all alerts between the two times.
+        """
         candidates = self.index.timerange_search(start, end)
         return self._stream_alerts(candidates)
 
@@ -145,6 +260,19 @@ class Database:
         self, center: SkyCoord, radius: Angle
     ) -> AsyncGenerator[AlertRecord, None]:
         candidates = self.index.cone_search(center, radius)
+        """
+        Asynchronously start retrieving all alerts in a circular region of the sky.
+
+        This is the async equivalent of :py:obj:`get_by_cone_search`.
+
+        :param center: The center of the circular region to search.
+        :type center: astropy.coordinates.SkyCoord
+
+        :param radius: The radius of the disc to search over.
+        :type radius: astropy.coordinates.Angle
+
+        :returns: An asynchronous stream of the alerts in the region.
+        """
         return self._stream_alerts(candidates)
 
     def _download_alerts(self, candidates: Iterator[int]) -> List[AlertRecord]:
@@ -164,7 +292,8 @@ class Database:
         self,
         candidate_ids: Iterator[int],
     ) -> AsyncGenerator[AlertRecord, None]:
-        """Asynchronously fetch all the candidates' associated alert data. Returns an
+        """
+        Asynchronously fetch all the candidates' associated alert data. Returns an
         asynchronous generator over the alerts.
         """
         url_queue: asyncio.Queue[str] = asyncio.Queue()

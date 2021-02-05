@@ -31,7 +31,24 @@ release = '0.0.1a0'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.intersphinx',
+    'sphinx_autodoc_typehints',
+    'scanpydoc.elegant_typehints',
 ]
+
+qualname_overrides = {
+    "alertbase.db.Database": "alertbase.Database",
+    "alertbase.alert.AlertRecord": "alertbase.AlertRecord",
+}
+
+intersphinx_mapping = {
+    'astropy': ('https://docs.astropy.org/en/latest', None)
+}
+
+autodoc_member_order = 'groupwise'
+autodoc_typehints = 'description'
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

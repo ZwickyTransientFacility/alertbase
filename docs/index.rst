@@ -6,17 +6,18 @@
 Welcome to alertbase's documentation!
 =====================================
 
-This is an experiment in archiving and indexing alert data from the Zwicky Transient Facility.
+This is an experiment in archiving and indexing alert data from the Zwicky
+Transient Facility.
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
+   api
 
 
 Indices and tables
 ==================
 
 * :ref:`genindex`
-* :ref:`modindex`
 * :ref:`search`
