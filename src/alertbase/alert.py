@@ -19,13 +19,22 @@ _optional_int = schema.parse('["null", "int"]')
 
 @dataclass
 class AlertRecord:
-    candidate_id: int
-    object_id: str
-    position: SkyCoord
-    timestamp: Time
+    """
+    An AlertRecord is a wrapper around a ZTF Alert. It provides a few utility
+    functions, but for the most part it is used as a type that's passed into and
+    out of a :py:obj:`Database`.
+    """
 
-    raw_data: Optional[bytes]
-    raw_dict: Optional[Dict[str, Any]]
+    #: The ZTF Candidate ID for this alert.
+    candidate_id: int
+
+    #: The ZTF Object ID for this alert.
+    object_id: str
+    position: SkyCoord  #: The RA-Dec position of this alert.
+    timestamp: Time  #: The time of the exposure that sourced this alert.
+
+    raw_data: Optional[bytes]  #: The Avro serialization of this dalert's data.
+    raw_dict: Optional[Dict[str, Any]]  #: The full alert payload.
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> AlertRecord:
@@ -33,6 +42,8 @@ class AlertRecord:
         Constructs an AlertRecord from an avro-style dictionary representing a ZTF
         alert.
 
+        :param d: The dictionary to load from.
+        :returns: The AlertRecord with all fields filled out.
         """
         pos = SkyCoord(
             ra=d["candidate"]["ra"],
@@ -52,7 +63,13 @@ class AlertRecord:
 
     @classmethod
     def from_file_safe(cls, fp: IO[bytes]) -> AlertRecord:
-        """ Read from an alert file stored on disk. """
+        """
+        Read from an Avro alert file stored on disk.
+
+        :param fp: A file-like object to read raw bytes from for
+                   deserialization.
+        :returns: The fully deserialized AlertRecord.
+        """
         # Save a copy of the raw bytes
         raw_data = fp.read()
         buf = io.BytesIO(raw_data)
@@ -64,10 +81,16 @@ class AlertRecord:
 
     @classmethod
     def from_file_unsafe(cls, fp: IO[bytes]) -> AlertRecord:
-        """Read from an alert file stored on disk, recklessly making assumptions about
+        """
+        Read from an alert file stored on disk, recklessly making assumptions about
         its schema. This is *much* faster (~20-50x) than the safe call, but can
         yield errors, or severely incorrect data in the worst case.
 
+        The returned AlertRecord will have its :py:attr:`raw_data` field filled
+        out, but not :py:attr:`raw_dict`.
+
+        :param fp: A file-like object to ead raw bytes from for deserialization.
+        :returns: The deserialized AlertRecord.
         """
         # Save a copy of the raw bytes
         raw_data = fp.read()

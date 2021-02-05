@@ -43,6 +43,8 @@ extensions = [
 qualname_overrides = {
     "alertbase.db.Database": "alertbase.Database",
     "alertbase.alert.AlertRecord": "alertbase.AlertRecord",
+    "astropy.coordinates.sky_coordinate.SkyCoord": "astropy.coordinates.SkyCoord",
+    "astropy.time.core.Time": "astropy.time.Time",
 }
 
 intersphinx_mapping = {
