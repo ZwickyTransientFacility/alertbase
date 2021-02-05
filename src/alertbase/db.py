@@ -40,7 +40,7 @@ class Database:
         db_path: Union[pathlib.Path, str],
         create_if_missing: bool = False,
     ):
-        """ Legacy constructor."""
+        """Legacy constructor."""
         self.db_path = pathlib.Path(db_path)
         self.index = IndexDB(db_path, create_if_missing)
         self.blobstore = Blobstore(s3_region, bucket)
@@ -150,6 +150,68 @@ class Database:
             alert.candidate_id,
             time.monotonic() - start,
         )
+
+    def write(self, alert: AlertRecord) -> None:
+        """
+        Synchronously write a single alert into the database.
+
+        :param alert: The alert to write to the database.
+        """
+
+        async def do_write() -> None:
+            async with await self.blobstore.session() as session:
+                await self._write(alert, session)
+
+        return asyncio.run(do_write())
+
+    async def write_many(self, alerts: Iterator[AlertRecord], n_worker: int) -> None:
+        """
+        Asynchronously write many alerts into the database.
+
+        Writes are spread across upload workers. Each worker maintains a
+        connection with S3 to write data. More workers can improve performance,
+        until you add _so_ many that either switching between them becomes a
+        bottleneck or S3 starts throttling you.
+
+        In addition, each worker has a fixed startup cost, so for very brief
+        iterators of alerts, using a small number of workers will be faster
+        overall.
+
+        :param alerts: An iterator which produces the alerts to be written.
+
+        :param n_worker: The number of upload workers to use. Usually, this
+                         should be between about 2 and 10.
+        """
+        q: asyncio.Queue[AlertRecord] = asyncio.Queue()
+        iterator_done = asyncio.Event()
+
+        async def enqueue_alerts() -> None:
+            for alert in alerts:
+                await q.put(alert)
+                await asyncio.sleep(0)  # Yield to the scheduler.
+            iterator_done.set()
+
+        async def do_write() -> None:
+            async with await self.blobstore.session() as session:
+                while True:
+                    if iterator_done.is_set() and q.empty():
+                        break
+                    alert = await q.get()
+                    await self._write(alert, session)
+                    q.task_done()
+                    await asyncio.sleep(0)  # Yield to the scheduler
+
+        workers = []
+        asyncio.create_task(enqueue_alerts())
+        for i in range(n_worker):
+            task = asyncio.create_task(do_write())
+            workers.append(task)
+
+        try:
+            await asyncio.gather(*workers)
+        finally:
+            for w in workers:
+                w.cancel()
 
     def get_by_candidate_id(self, candidate_id: int) -> Optional[AlertRecord]:
         """
@@ -276,7 +338,8 @@ class Database:
         return self._stream_alerts(candidates)
 
     def _download_alerts(self, candidates: Iterator[int]) -> List[AlertRecord]:
-        """Run an async loop to get all the candidates' associated alert data. Block
+        """
+        Run an async loop to get all the candidates' associated alert data. Block
         until it's complete, returning a complete list.
         """
 
@@ -346,19 +409,19 @@ class Database:
         limit: Optional[int] = None,
         skip_existing: bool = False,
     ) -> None:
-        """Upload a ZTF-style tarfile of alert data using a pool of workers to
+        """
+        Upload a ZTF-style tarfile of alert data using a pool of workers to
         concurrently upload alerts.
 
-        tarfile_path: a local path on disk to a gzipped tarfile containing
+        :param tarfile_path: a local path on disk to a gzipped tarfile containing
         individual avro-serialized alert files.
 
-        n_worker: the number of concurrent S3 sessions to open for uploading.
+        :param n_worker: the number of concurrent S3 sessions to open for uploading.
 
-        limit: maximum numbr of alerts to upload.
+        :param limit: maximum numbr of alerts to upload.
 
-        skip_existing: if true, don't upload alerts which are already present in
-        the local index
-
+        :param skip_existing: if true, don't upload alerts which are already
+        present in the local index
         """
 
         # Putting a limit on the queue size ensures that we don't slurp

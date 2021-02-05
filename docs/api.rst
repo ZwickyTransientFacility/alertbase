@@ -44,6 +44,9 @@ API Reference
    .. automethod:: get_by_cone_search
    .. automethod:: get_by_cone_search_async
 
+   .. automethod:: write
+   .. automethod:: write_many
+
    .. automethod:: __enter__
    .. automethod:: __exit__
 
