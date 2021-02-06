@@ -84,7 +84,7 @@ You'll get all alerts that come from exposures within that time range.
        print(a.raw_dict['candidate']['magpsf'])
 
 Advanced: Using :py:mod:`asyncio`
------------------------
+---------------------------------
 
 If you're processing a lot of large queries, or just feeling particularly brave,
 you can use the ``async`` APIs of :py:obj:`alertbase.Database`. Each ``get_``
