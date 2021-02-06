@@ -278,7 +278,7 @@ class Database:
         candidates = self.index.cone_search(center, radius)
         return self._download_alerts(candidates)
 
-    async def get_by_object_id_async(
+    def get_by_object_id_stream(
         self, object_id: str
     ) -> AsyncGenerator[AlertRecord, None]:
         """
@@ -295,7 +295,7 @@ class Database:
         candidates = self.index.object_search(object_id)
         return self._stream_alerts(candidates)
 
-    async def get_by_time_range_async(
+    def get_by_time_range_stream(
         self, start: Time, end: Time
     ) -> AsyncGenerator[AlertRecord, None]:
         """
@@ -318,7 +318,7 @@ class Database:
         candidates = self.index.timerange_search(start, end)
         return self._stream_alerts(candidates)
 
-    async def get_by_cone_search_async(
+    def get_by_cone_search_stream(
         self, center: SkyCoord, radius: Angle
     ) -> AsyncGenerator[AlertRecord, None]:
         candidates = self.index.cone_search(center, radius)
@@ -414,14 +414,14 @@ class Database:
         concurrently upload alerts.
 
         :param tarfile_path: a local path on disk to a gzipped tarfile containing
-        individual avro-serialized alert files.
+                             individual avro-serialized alert files.
 
         :param n_worker: the number of concurrent S3 sessions to open for uploading.
 
-        :param limit: maximum numbr of alerts to upload.
+        :param limit: maximum number of alerts to upload.
 
         :param skip_existing: if true, don't upload alerts which are already
-        present in the local index
+                              present in the local index
         """
 
         # Putting a limit on the queue size ensures that we don't slurp

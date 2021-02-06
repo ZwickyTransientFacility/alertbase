@@ -35,6 +35,7 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.napoleon',
     'sphinx.ext.intersphinx',
+    'sphinx.ext.autosectionlabel',
     'sphinx_autodoc_typehints',
     'scanpydoc.elegant_typehints',
     'sphinx_rtd_theme',

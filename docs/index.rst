@@ -13,7 +13,11 @@ Transient Facility.
    :maxdepth: 2
    :caption: Contents:
 
+   install
+   usage
    api
+   design
+   db_creation
 
 
 Indices and tables

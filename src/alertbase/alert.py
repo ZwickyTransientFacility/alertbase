@@ -19,12 +19,6 @@ _optional_int = schema.parse('["null", "int"]')
 
 @dataclass
 class AlertRecord:
-    """
-    An AlertRecord is a wrapper around a ZTF Alert. It provides a few utility
-    functions, but for the most part it is used as a type that's passed into and
-    out of a :py:obj:`Database`.
-    """
-
     #: The ZTF Candidate ID for this alert.
     candidate_id: int
 
