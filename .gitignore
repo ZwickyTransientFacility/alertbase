@@ -1,4 +1,4 @@
-virtualenv
+virtualenv*
 pip-wheel-metadata
 *.egg-info
 __pycache__
