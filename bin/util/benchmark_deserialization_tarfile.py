@@ -5,10 +5,10 @@ import numpy as np
 
 
 def main():
-    do_benchmark("read_safe")
-    do_benchmark("read_manual_decoder")
-    do_benchmark("read_subschema")
+    do_benchmark("read_precompile")
     do_benchmark("read_fastavro_safe")
+    do_benchmark("read_safe")
+    do_benchmark("read_subschema")
     do_benchmark("read_fastavro_manual_decoder")
     do_benchmark("read_fastavro_subschema")
 
@@ -37,8 +37,8 @@ filepath = "testdata/alertfiles/ztf_public_20210120.tar.gz"
 untarred_size = 170277376  # bytes
 n_alerts = 2567
 
-def read_manual_decoder():
-    iterator = iterate_tarfile(filepath, AlertRecord.from_file_unsafe)
+def read_precompile():
+    iterator = iterate_tarfile(filepath, AlertRecord.from_file_precompile)
     return sum(1 for _ in iterator)
 
 def read_safe():

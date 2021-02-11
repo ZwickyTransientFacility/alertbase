@@ -248,7 +248,7 @@ class AlertRecord:
         # Size in bytes of the serialized objects in the block
         _ = fastavro._read.skip_long(buf)
 
-        alert_dict = alert_schemas.precompiled_writer_parser(buf)
+        alert_dict = alert_schemas.precompiled_reader(buf)
         alert = cls.from_dict(alert_dict)
         alert.raw_data = raw_data
         return alert

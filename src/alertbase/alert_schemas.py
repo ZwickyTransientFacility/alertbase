@@ -3,7 +3,6 @@
 import fastavro
 import avro.schema
 import json
-from alertbase import schema_compile
 
 reader_schema = {
     "type": "record",
@@ -1057,10 +1056,13 @@ tiny_schema = {
 }
 
 fastavro_reader_schema = fastavro.parse_schema(reader_schema)
-fastavro_writer_schema = fastavro.parse_schema(writer_schema)
+fastavro_writer_schema = fastavro.parse_schema(writer_schema, expand=True)
 
 avro_reader_schema = avro.schema.parse(json.dumps(reader_schema))
 avro_writer_schema = avro.schema.parse(json.dumps(writer_schema))
 
+import fastavro.compile.ast_compile
 
-precompiled_writer_parser = schema_compile.compile_schema(avro_writer_schema)
+precompiled_reader = fastavro.compile.ast_compile.SchemaParser(
+    fastavro_writer_schema
+).compile()
